@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_move_form_amazon" model="ir.ui.view">
+        <field name="name">account.move.form.amazon</field>
+        <field name="model">account.move</field>
+        <field name="inherit_id" ref="account.view_move_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='ref']" position="after">
+                <field name="amazon_invoice_number" readonly="1"/>
+                <field name="amazon_order_id" readonly="1"/>
+                <field name="credit_note_no" readonly="1" invisible="move_type not in ('out_refund', 'in_refund')"/>
+                <field name="credit_note_date" readonly="1" invisible="move_type not in ('out_refund', 'in_refund')"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>
