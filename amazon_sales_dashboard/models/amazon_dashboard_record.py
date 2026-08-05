@@ -196,19 +196,32 @@ class AmazonDashboardRecord(models.Model):
                 if sgst_taxes:
                     matched_taxes |= sgst_taxes[:1]
 
-            # 3. Fallback: Look for Intra Group Tax
+            # 3. Fallback: Search Group Tax by matching exact percentage (e.g. 18%, 12%, 5%, 28%)
             if not matched_taxes and tot_tax_pct > 0:
-                group_taxes = Tax.search(domain + [('amount_type', '=', 'group')]).filtered(lambda t: 'IGST' not in t.name.upper() and ('CGST' in t.name.upper() or 'SGST' in t.name.upper() or 'GST' in t.name.upper()))
+                tot_int = int(round(tot_tax_pct))
+                group_taxes = Tax.search(domain + [('amount_type', '=', 'group')]).filtered(
+                    lambda t: 'IGST' not in t.name.upper() and (f"{tot_int}%" in t.name or f" {tot_int} " in f" {t.name} " or f"GST {tot_int}" in t.name.upper() or f"{tot_tax_pct}%" in t.name)
+                )
                 if group_taxes:
                     matched_taxes |= group_taxes[:1]
+
+            # 4. Search group taxes where children tax amounts sum up to tot_tax_pct
+            if not matched_taxes and tot_tax_pct > 0:
+                all_groups = Tax.search(domain + [('amount_type', '=', 'group')])
+                for g in all_groups:
+                    child_sum = sum(g.children_tax_ids.mapped('amount'))
+                    if round(child_sum, 2) == round(tot_tax_pct, 2) and 'IGST' not in g.name.upper():
+                        matched_taxes |= g
+                        break
 
         else:
             # --- INTER-STATE (Amazon inter: Kerala -> Outside Kerala) ---
             # MUST apply IGST. CANNOT apply CGST/SGST split!
             if tot_tax_pct > 0:
+                tot_int = int(round(tot_tax_pct))
                 igst_taxes = Tax.search(domain + [('amount', '=', tot_tax_pct)]).filtered(lambda t: 'IGST' in t.name.upper())
                 if not igst_taxes:
-                    igst_taxes = Tax.search(domain + [('amount', '=', tot_tax_pct)]).filtered(lambda t: 'INTER' in t.name.upper() or 'OUTSIDE' in t.name.upper())
+                    igst_taxes = Tax.search(domain).filtered(lambda t: 'IGST' in t.name.upper() and (f"{tot_int}%" in t.name or f"{tot_tax_pct}%" in t.name))
                 if not igst_taxes:
                     igst_taxes = Tax.search(domain + [('amount', '=', tot_tax_pct)])
                 if igst_taxes:
