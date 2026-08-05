@@ -22,6 +22,8 @@ export class AmazonSalesDashboard extends Component {
             selectedIds: new Set(),
             isAllSelected: false,
             isLoading: false,
+            isCleared: false,
+            isAllDashboard: false,
         });
 
         onWillStart(async () => {
@@ -31,8 +33,9 @@ export class AmazonSalesDashboard extends Component {
 
     async loadDashboardData() {
         this.state.isLoading = true;
+        this.state.isCleared = false;
         try {
-            const data = await this.orm.call("amazon.dashboard.record", "get_dashboard_data", []);
+            const data = await this.orm.call("amazon.dashboard.record", "get_dashboard_data", [this.state.isAllDashboard]);
             this.state.kpis = data.kpis || {};
             this.state.allRecords = data.all_records || [];
             this.state.selectedIds.clear();
@@ -56,7 +59,7 @@ export class AmazonSalesDashboard extends Component {
             result = result.filter(r => r.transaction_type === this.state.typeFilter);
         }
 
-        // 2. Status Filter (Default: 'pending' -> draft & error)
+        // 2. Status Filter
         if (this.state.statusFilter === "pending") {
             result = result.filter(r => r.state === "draft" || r.state === "error");
         } else if (this.state.statusFilter === "so_created") {
@@ -83,6 +86,12 @@ export class AmazonSalesDashboard extends Component {
         this.updateSelectAllStatus();
     }
 
+    onSelectKpiCard(type, status) {
+        this.state.typeFilter = type;
+        this.state.statusFilter = status;
+        this.applyFilters();
+    }
+
     onTypeFilterChange(type) {
         this.state.typeFilter = type;
         if (type === "Shipment" && this.state.statusFilter === "refund_created") {
@@ -101,6 +110,25 @@ export class AmazonSalesDashboard extends Component {
     onSearchInput(ev) {
         this.state.searchQuery = ev.target.value;
         this.applyFilters();
+    }
+
+    onClearDashboardView() {
+        this.state.allRecords = [];
+        this.state.filteredRecords = [];
+        this.state.kpis = {
+            total_shipments_count: 0,
+            total_shipment_amount: 0,
+            pending_shipments_count: 0,
+            total_refunds_count: 0,
+            total_refund_amount: 0,
+            pending_refunds_count: 0,
+            currency_symbol: this.state.kpis.currency_symbol || '₹',
+            latest_batch_id: "Dashboard Cleared",
+        };
+        this.state.selectedIds.clear();
+        this.state.isAllSelected = false;
+        this.state.isCleared = true;
+        this.notification.add("Dashboard view cleared. (Database records remain safe)", { type: "info" });
     }
 
     toggleSelectAll(ev) {
@@ -202,4 +230,12 @@ export class AmazonSalesDashboard extends Component {
     }
 }
 
+export class AmazonAllSalesDashboard extends AmazonSalesDashboard {
+    setup() {
+        super.setup();
+        this.state.isAllDashboard = true;
+    }
+}
+
 registry.category("actions").add("amazon_dashboard_main_action", AmazonSalesDashboard);
+registry.category("actions").add("amazon_dashboard_all_action", AmazonAllSalesDashboard);

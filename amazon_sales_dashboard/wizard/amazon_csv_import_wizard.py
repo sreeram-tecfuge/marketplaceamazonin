@@ -59,6 +59,21 @@ class AmazonCsvImportWizard(models.TransientModel):
         except ValueError:
             return 0.0
 
+    def _clean_str_id(self, val_str):
+        """ Clean scientific notation strings like '5.65083E+11' into integer strings '565083000000' """
+        if not val_str or not str(val_str).strip():
+            return ''
+        val_str = str(val_str).strip()
+        if ('e+' in val_str.lower() or 'e-' in val_str.lower() or '.' in val_str):
+            try:
+                flt_val = float(val_str)
+                if flt_val.is_integer():
+                    return str(int(flt_val))
+                return str(flt_val)
+            except (ValueError, OverflowError):
+                pass
+        return val_str
+
     def action_import(self):
         self.ensure_one()
         if not self.file_data:
@@ -112,17 +127,20 @@ class AmazonCsvImportWizard(models.TransientModel):
 
             total_rows += 1
 
-            def get_val(key):
+            def get_val(key, is_id=False):
                 idx = header_map.get(key)
                 if idx is not None and idx < len(row):
-                    return row[idx].strip()
+                    val = row[idx].strip()
+                    if is_id and val:
+                        return self._clean_str_id(val)
+                    return val
                 return ''
 
             tx_type = get_val('transaction_type')
-            order_id = get_val('order_id')
-            inv_num = get_val('invoice_number')
+            order_id = get_val('order_id', is_id=True)
+            inv_num = get_val('invoice_number', is_id=True)
             sku = get_val('sku')
-            cn_no = get_val('credit_note_no')
+            cn_no = get_val('credit_note_no', is_id=True)
 
             # Filter ONLY Shipment and Refund transaction types (ignore Cancel and other types)
             if tx_type not in ('Shipment', 'Refund'):
@@ -155,14 +173,14 @@ class AmazonCsvImportWizard(models.TransientModel):
                     'invoice_date': self._parse_datetime(get_val('invoice_date')),
                     'transaction_type': tx_type,
                     'order_id': order_id,
-                    'shipment_id': get_val('shipment_id'),
+                    'shipment_id': get_val('shipment_id', is_id=True),
                     'shipment_date': self._parse_datetime(get_val('shipment_date')),
                     'order_date': self._parse_datetime(get_val('order_date')),
-                    'shipment_item_id': get_val('shipment_item_id'),
+                    'shipment_item_id': get_val('shipment_item_id', is_id=True),
                     'quantity': self._parse_float(get_val('quantity')) or 1.0,
                     'item_description': get_val('item_description'),
-                    'asin': get_val('asin'),
-                    'hsn_sac': get_val('hsn_sac') or get_val('hsn'),
+                    'asin': get_val('asin', is_id=True),
+                    'hsn_sac': get_val('hsn_sac', is_id=True) or get_val('hsn', is_id=True),
                     'sku': sku,
                     'product_tax_code': get_val('product_tax_code'),
                     

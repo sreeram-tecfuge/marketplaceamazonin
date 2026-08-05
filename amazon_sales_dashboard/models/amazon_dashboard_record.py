@@ -318,6 +318,21 @@ class AmazonDashboardRecord(models.Model):
                     ('amazon_order_id', '=', rec.order_id)
                 ], limit=1)
 
+                # Step 2: Check Amazon transaction history for matching Shipment record
+                shipment_history = self.search([
+                    ('transaction_type', '=', 'Shipment'),
+                    '|',
+                    ('order_id', '=', rec.order_id),
+                    ('invoice_number', '=', rec.invoice_number)
+                ], limit=1)
+
+                # Step 3: Require Sale Order / Invoice to be created first!
+                if not origin_so and not origin_inv:
+                    if shipment_history:
+                        raise UserError(_("Sale Order has not been created yet for Order ID '%s' (Invoice: %s). Please create the Sale Order for the Shipment first before creating the Refund.") % (rec.order_id, rec.invoice_number or 'N/A'))
+                    else:
+                        raise UserError(_("No created Sale Order or Invoice found for Order ID '%s'. Please create the Sale Order first before creating the Refund.") % rec.order_id)
+
                 partner = origin_inv.partner_id or origin_so.partner_id or rec._get_or_create_partner(rec.ship_to_state)
                 product = rec._find_product_by_sku(rec.sku, rec.item_description, rec.hsn_sac, rec.asin, rec.product_tax_code)
                 rec.product_id = product.id
@@ -396,13 +411,19 @@ class AmazonDashboardRecord(models.Model):
         return True
 
     @api.model
-    def get_dashboard_data(self):
-        """ API method for dynamic JS/OWL dashboard - displays only latest uploaded batch """
-        latest_rec = self.search([('import_batch_id', '!=', False)], order='id desc', limit=1)
-        if latest_rec and latest_rec.import_batch_id:
-            records = self.search([('import_batch_id', '=', latest_rec.import_batch_id)], order='order_date desc, id desc')
-        else:
+    def get_dashboard_data(self, show_all=False):
+        """ API method for dynamic JS/OWL dashboard - displays latest batch or all data """
+        if show_all or self._context.get('show_all'):
             records = self.search([], order='order_date desc, id desc')
+            batch_title = "All Historical Data"
+        else:
+            latest_rec = self.search([('import_batch_id', '!=', False)], order='id desc', limit=1)
+            if latest_rec and latest_rec.import_batch_id:
+                records = self.search([('import_batch_id', '=', latest_rec.import_batch_id)], order='order_date desc, id desc')
+                batch_title = latest_rec.import_batch_id
+            else:
+                records = self.search([], order='order_date desc, id desc')
+                batch_title = "Latest Upload"
 
         shipments = records.filtered(lambda r: r.transaction_type == 'Shipment')
         refunds = records.filtered(lambda r: r.transaction_type == 'Refund')
@@ -448,7 +469,7 @@ class AmazonDashboardRecord(models.Model):
             'total_refund_amount': round(sum(refunds.mapped('invoice_amount')), 2),
             'pending_refunds_count': len(refunds.filtered(lambda r: r.state in ('draft', 'error'))),
             'currency_symbol': self.env.company.currency_id.symbol or '₹',
-            'latest_batch_id': latest_rec.import_batch_id if (latest_rec and latest_rec.import_batch_id) else 'Latest Upload',
+            'latest_batch_id': batch_title,
         }
 
         return {

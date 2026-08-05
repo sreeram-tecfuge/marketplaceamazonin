@@ -7,12 +7,19 @@
               action="action_amazon_dashboard_client"
               sequence="2"/>
 
-    <!-- Main Dynamic JS Dashboard Action -->
+    <!-- Main Dynamic JS Dashboard Action (Latest Upload Only) -->
     <menuitem id="menu_amazon_dashboard_main_client"
-              name="Interactive Dashboard"
+              name="Latest Upload Dashboard"
               parent="menu_amazon_dashboard_root"
               action="action_amazon_dashboard_client"
               sequence="1"/>
+
+    <!-- Dynamic JS Dashboard Action for All Historical Data -->
+    <menuitem id="menu_amazon_dashboard_all_client"
+              name="All Data Dashboard"
+              parent="menu_amazon_dashboard_root"
+              action="action_amazon_dashboard_all_client"
+              sequence="2"/>
 
     <!-- Submenu: Shipment Data List -->
     <menuitem id="menu_amazon_dashboard_shipment"

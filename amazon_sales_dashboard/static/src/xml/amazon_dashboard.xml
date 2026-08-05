@@ -7,16 +7,26 @@
             <div class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom dashboard-header">
                 <div>
                     <h2 class="fw-bold mb-1 text-dark d-flex align-items-center gap-2">
-                        <i class="fa fa-amazon text-warning"></i> Amazon Sales &amp; Refund Dashboard
+                        <i class="fa fa-amazon text-warning"></i>
+                        <t t-if="state.isAllDashboard">Amazon All Sales &amp; Refunds Dashboard</t>
+                        <t t-else="">Amazon Sales &amp; Refund Dashboard</t>
                     </h2>
                     <div class="d-flex align-items-center gap-2">
-                        <span class="text-muted fs-6">Latest Upload File Dashboard</span>
+                        <span class="text-muted fs-6">
+                            <t t-if="state.isAllDashboard">All Historical Data across all past file uploads</t>
+                            <t t-else="">Latest Upload File Dashboard</t>
+                        </span>
                         <span class="badge bg-secondary-subtle text-secondary border rounded-pill px-2 py-1 small">
-                            <i class="fa fa-file-text-o me-1"></i> <t t-esc="state.kpis.latest_batch_id || 'Latest Upload'"/>
+                            <i class="fa fa-database me-1"></i> <t t-esc="state.kpis.latest_batch_id || 'Latest Upload'"/>
                         </span>
                     </div>
                 </div>
                 <div class="d-flex align-items-center gap-2">
+                    <t t-if="!state.isAllDashboard">
+                        <button class="btn btn-outline-danger btn-sm rounded-pill shadow-sm" t-on-click="onClearDashboardView" title="Clear current dashboard view (Database records remain safe)">
+                            <i class="fa fa-eraser me-1"></i> Clear View
+                        </button>
+                    </t>
                     <button class="btn btn-outline-secondary btn-sm rounded-pill shadow-sm" t-on-click="onRefresh">
                         <i class="fa fa-refresh me-1"></i> Refresh
                     </button>
@@ -26,11 +36,11 @@
                 </div>
             </div>
 
-            <!-- KPI Metric Summary Cards (4 Cards in Requested Formation) -->
+            <!-- KPI Metric Summary Cards (4 Cards) -->
             <div class="row g-3 mb-4">
                 <!-- Card 1: Total Shipment -->
                 <div class="col-12 col-sm-6 col-xl-3">
-                    <div class="kpi-card kpi-blue p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onTypeFilterChange('Shipment')">
+                    <div class="kpi-card kpi-blue p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onSelectKpiCard('Shipment', 'all')" title="Click to filter all shipments">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <span class="text-uppercase fw-semibold tracking-wider text-muted small">Total Shipment</span>
                             <div class="kpi-icon-badge bg-blue-subtle text-primary rounded-circle">
@@ -48,7 +58,7 @@
 
                 <!-- Card 2: Pending Shipment -->
                 <div class="col-12 col-sm-6 col-xl-3">
-                    <div class="kpi-card kpi-emerald p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => { this.onTypeFilterChange('Shipment'); this.state.statusFilter = 'pending'; this.applyFilters(); }">
+                    <div class="kpi-card kpi-emerald p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onSelectKpiCard('Shipment', 'pending')" title="Click to filter pending shipments">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <span class="text-uppercase fw-semibold tracking-wider text-muted small">Pending Shipment</span>
                             <div class="kpi-icon-badge bg-success-subtle text-success rounded-circle">
@@ -66,7 +76,7 @@
 
                 <!-- Card 3: Total Refund -->
                 <div class="col-12 col-sm-6 col-xl-3">
-                    <div class="kpi-card kpi-amber p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onTypeFilterChange('Refund')">
+                    <div class="kpi-card kpi-amber p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onSelectKpiCard('Refund', 'all')" title="Click to filter all refunds">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <span class="text-uppercase fw-semibold tracking-wider text-muted small">Total Refund</span>
                             <div class="kpi-icon-badge bg-warning-subtle text-warning rounded-circle">
@@ -84,7 +94,7 @@
 
                 <!-- Card 4: Pending Refunds -->
                 <div class="col-12 col-sm-6 col-xl-3">
-                    <div class="kpi-card kpi-purple p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => { this.onTypeFilterChange('Refund'); this.state.statusFilter = 'pending'; this.applyFilters(); }">
+                    <div class="kpi-card kpi-purple p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onSelectKpiCard('Refund', 'pending')" title="Click to filter pending refunds">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <span class="text-uppercase fw-semibold tracking-wider text-muted small">Pending Refunds</span>
                             <div class="kpi-icon-badge bg-danger-subtle text-danger rounded-circle">
@@ -184,7 +194,12 @@
                                 <tr>
                                     <td colspan="12" class="text-center py-5 text-muted">
                                         <i class="fa fa-folder-open-o fs-2 mb-2 d-block text-secondary"></i>
-                                        No transaction records match the current filters.
+                                        <t t-if="state.isCleared">
+                                            Dashboard view cleared. Click <b>Upload Excel/CSV File</b> or <b>Refresh</b> to reload data.
+                                        </t>
+                                        <t t-else="">
+                                            No transaction records match the current filters.
+                                        </t>
                                     </td>
                                 </tr>
                             </t>

@@ -264,9 +264,15 @@
         </field>
     </record>
 
-    <!-- Dynamic OWL JS Client Action -->
+    <!-- Dynamic OWL JS Client Action: Latest Upload Only -->
     <record id="action_amazon_dashboard_client" model="ir.actions.client">
         <field name="name">Amazon Sales Dashboard</field>
         <field name="tag">amazon_dashboard_main_action</field>
+    </record>
+
+    <!-- Dynamic OWL JS Client Action: All Historical Data -->
+    <record id="action_amazon_dashboard_all_client" model="ir.actions.client">
+        <field name="name">Amazon All Sales Dashboard</field>
+        <field name="tag">amazon_dashboard_all_action</field>
     </record>
 </odoo>
