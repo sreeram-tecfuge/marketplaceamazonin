@@ -96,18 +96,27 @@ class AmazonCsvImportWizard(models.TransientModel):
         if not text_content:
             raise UserError(_("Could not decode file encoding. Please ensure it is a valid CSV/Text file."))
 
-        f = io.StringIO(text_content)
-        reader = csv.reader(f)
-        try:
-            header = next(reader)
-        except StopIteration:
+        lines = text_content.splitlines()
+        if not lines:
             raise UserError(_("Uploaded file is empty."))
+
+        try:
+            reader = csv.reader(lines)
+            header = next(reader)
+        except Exception as ce:
+            raise UserError(_("Could not parse file as CSV: %s") % ce)
 
         # Standardize header names
         header_map = {}
         for idx, col in enumerate(header):
             clean_col = col.strip().lower().replace(' ', '_').replace('/', '_')
             header_map[clean_col] = idx
+
+        # Header Validation: Ensure this is a valid Amazon report file
+        required_headers = ['transaction_type', 'order_id']
+        missing_headers = [h for h in required_headers if h not in header_map]
+        if missing_headers:
+            raise UserError(_("Invalid Amazon File Header: Missing essential column(s) '%s'. Please upload a valid Amazon Sales/Refund CSV/Excel report file.") % ", ".join(missing_headers))
 
         _logger.info(f"Importing Amazon CSV with headers: {list(header_map.keys())}")
 
@@ -121,7 +130,16 @@ class AmazonCsvImportWizard(models.TransientModel):
         ignored_count = 0
         log_lines = []
 
-        for row in reader:
+        while True:
+            try:
+                row = next(reader, None)
+                if row is None:
+                    break
+            except Exception as re:
+                _logger.warning(f"Error reading CSV row: {re}")
+                log_lines.append(f"• [ROW READ ERROR] Skipped unparseable row: {re}")
+                continue
+
             if not row or not any(row):
                 continue
 
