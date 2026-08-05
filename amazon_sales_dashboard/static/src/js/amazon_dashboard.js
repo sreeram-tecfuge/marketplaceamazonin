@@ -190,8 +190,29 @@ export class AmazonSalesDashboard extends Component {
 
     async onCreateSaleOrder(recordId) {
         try {
-            await this.orm.call("amazon.dashboard.record", "action_create_sale_order", [[recordId]]);
-            this.notification.add("Sale Order, Delivery & Invoice generated successfully!", { type: "success" });
+            const res = await this.orm.call("amazon.dashboard.record", "action_create_sale_order", [[recordId]]);
+            const soName = res && res.name ? res.name : "Sale Order";
+            const soId = res && res.res_id ? res.res_id : false;
+
+            if (soId) {
+                this.notification.add(`Sale Order ${soName}, Delivery & Invoice generated successfully!`, {
+                    type: "success",
+                    buttons: [{
+                        name: `Open ${soName}`,
+                        onClick: () => {
+                            this.action.doAction({
+                                type: "ir.actions.act_window",
+                                res_model: "sale.order",
+                                res_id: soId,
+                                views: [[false, "form"]],
+                                target: "current",
+                            });
+                        }
+                    }]
+                });
+            } else {
+                this.notification.add("Sale Order, Delivery & Invoice generated successfully!", { type: "success" });
+            }
             await this.loadDashboardData();
         } catch (error) {
             console.error("Error creating Sale Order:", error);
@@ -203,8 +224,37 @@ export class AmazonSalesDashboard extends Component {
 
     async onCreateRefund(recordId) {
         try {
-            await this.orm.call("amazon.dashboard.record", "action_create_refund", [[recordId]]);
-            this.notification.add("Refund (Credit Note) generated successfully!", { type: "success" });
+            const res = await this.orm.call("amazon.dashboard.record", "action_create_refund", [[recordId]]);
+            if (res && typeof res === 'object' && res.type === 'ir.actions.act_window') {
+                await this.action.doAction(res, {
+                    onClose: async () => {
+                        await this.loadDashboardData();
+                    }
+                });
+                return;
+            }
+            const cnName = res && res.name ? res.name : "Credit Note";
+            const cnId = res && res.res_id ? res.res_id : false;
+
+            if (cnId) {
+                this.notification.add(`Refund Credit Note ${cnName} generated successfully!`, {
+                    type: "success",
+                    buttons: [{
+                        name: `Open ${cnName}`,
+                        onClick: () => {
+                            this.action.doAction({
+                                type: "ir.actions.act_window",
+                                res_model: "account.move",
+                                res_id: cnId,
+                                views: [[false, "form"]],
+                                target: "current",
+                            });
+                        }
+                    }]
+                });
+            } else {
+                this.notification.add("Refund (Credit Note) generated successfully!", { type: "success" });
+            }
             await this.loadDashboardData();
         } catch (error) {
             console.error("Error creating Refund:", error);

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_amazon_refund_confirmation_wizard_form" model="ir.ui.view">
+        <field name="name">amazon.refund.confirmation.wizard.form</field>
+        <field name="model">amazon.refund.confirmation.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Refund Creation Confirmation">
+                <field name="wizard_type" invisible="1"/>
+                
+                <!-- Alert Banner for Pending SO -->
+                <div invisible="wizard_type != 'so_pending'">
+                    <div class="alert alert-warning d-flex align-items-center mb-3" role="alert">
+                        <div>
+                            <h5 class="alert-heading mb-1"><i class="fa fa-exclamation-triangle me-2"></i> Sale Order Not Created Yet</h5>
+                            <span>The Sale Order for this shipment has not been processed yet.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alert Banner for No SO Found -->
+                <div invisible="wizard_type != 'no_so_found'">
+                    <div class="alert alert-info d-flex align-items-center mb-3" role="alert">
+                        <div>
+                            <h5 class="alert-heading mb-1"><i class="fa fa-info-circle me-2"></i> No Sale Order Found</h5>
+                            <span>No prior Sale Order or Shipment history record was found for this order.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <group>
+                    <field name="message" readonly="1" nolabel="1" style="font-size: 1.05rem; font-weight: 500; color: #334155; border: none; background: transparent;"/>
+                </group>
+
+                <footer>
+                    <!-- Buttons when Sale Order is Pending -->
+                    <t invisible="wizard_type != 'so_pending'">
+                        <button name="action_create_so_then_refund" string="Create Sale Order First &amp; Refund" type="object" class="btn-primary"/>
+                        <button name="action_create_direct_refund" string="Create Direct Credit Note" type="object" class="btn-warning"/>
+                    </t>
+
+                    <!-- Buttons when No Sale Order Found -->
+                    <t invisible="wizard_type != 'no_so_found'">
+                        <button name="action_create_direct_refund" string="Create Direct Credit Note" type="object" class="btn-warning"/>
+                    </t>
+
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

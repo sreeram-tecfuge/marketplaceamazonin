@@ -137,8 +137,14 @@ class AmazonDashboardRecord(models.Model):
 
         return product
 
-    def _find_matching_taxes(self, company_id, cgst_rate, sgst_rate, igst_rate, utgst_rate):
-        """ Searches for sales tax in account.tax based on rates in decimal (e.g. 0.18 = 18%) """
+    def _find_matching_taxes(self, company_id, cgst_rate, sgst_rate, igst_rate, utgst_rate, is_intra=False):
+        """
+        Finds appropriate GST sales taxes in Odoo account.tax:
+        - If is_intra (Intra-state: Kerala to Kerala / 'Amazon intra'):
+          Applies CGST + SGST (e.g. 9% CGST + 9% SGST for 18% item). NEVER applies IGST!
+        - If not is_intra (Inter-state: Kerala to Outside / 'Amazon inter'):
+          Applies IGST (e.g. 18% IGST for 18% item). NEVER applies CGST/SGST!
+        """
         Tax = self.env['account.tax']
         domain = [
             ('type_tax_use', '=', 'sale'),
@@ -147,39 +153,66 @@ class AmazonDashboardRecord(models.Model):
         
         matched_taxes = self.env['account.tax']
 
-        # Convert rates to percentage integer/float
-        igst_pct = round(igst_rate * 100, 2) if igst_rate else 0.0
-        cgst_pct = round(cgst_rate * 100, 2) if cgst_rate else 0.0
-        sgst_pct = round(sgst_rate * 100, 2) if sgst_rate else 0.0
-        utgst_pct = round(utgst_rate * 100, 2) if utgst_rate else 0.0
+        # Fallback auto-calc tax rate from tax amount / price gross if rate is 0
+        gross = self.tax_exclusive_gross or (self.invoice_amount - self.total_tax_amount if self.invoice_amount > self.total_tax_amount else 0.0)
+        if gross > 0:
+            if not igst_rate and self.igst_tax > 0:
+                igst_rate = self.igst_tax / gross
+            if not cgst_rate and self.cgst_tax > 0:
+                cgst_rate = self.cgst_tax / gross
+            if not sgst_rate and self.sgst_tax > 0:
+                sgst_rate = self.sgst_tax / gross
+            if not utgst_rate and self.utgst_tax > 0:
+                utgst_rate = self.utgst_tax / gross
+            if not igst_rate and not cgst_rate and not sgst_rate and self.total_tax_amount > 0:
+                tot_r = self.total_tax_amount / gross
+                if is_intra:
+                    cgst_rate = tot_r / 2.0
+                    sgst_rate = tot_r / 2.0
+                else:
+                    igst_rate = tot_r
 
-        if igst_pct > 0:
-            taxes = Tax.search(domain + [('amount', '=', igst_pct)])
-            # Prefer IGST in name if available
-            igst_tax = taxes.filtered(lambda t: 'IGST' in t.name.upper() or 'GST' in t.name.upper())
-            if igst_tax:
-                matched_taxes |= igst_tax[:1]
-            elif taxes:
-                matched_taxes |= taxes[:1]
-        
-        if cgst_pct > 0:
-            cgst_tax = Tax.search(domain + [('amount', '=', cgst_pct)]).filtered(lambda t: 'CGST' in t.name.upper())
-            if cgst_tax:
-                matched_taxes |= cgst_tax[:1]
+        # Determine total tax percentage (e.g. 18%, 5%, 12%, 28%)
+        igst_pct = round(igst_rate * 100, 2) if (0 < igst_rate <= 1.0) else round(igst_rate, 2)
+        cgst_pct = round(cgst_rate * 100, 2) if (0 < cgst_rate <= 1.0) else round(cgst_rate, 2)
+        sgst_pct = round(sgst_rate * 100, 2) if (0 < sgst_rate <= 1.0) else round(sgst_rate, 2)
+        utgst_pct = round(utgst_rate * 100, 2) if (0 < utgst_rate <= 1.0) else round(utgst_rate, 2)
 
-        if sgst_pct > 0 or utgst_pct > 0:
-            sg_rate = sgst_pct or utgst_pct
-            sgst_tax = Tax.search(domain + [('amount', '=', sg_rate)]).filtered(lambda t: ('SGST' in t.name.upper() or 'UTGST' in t.name.upper()))
-            if sgst_tax:
-                matched_taxes |= sgst_tax[:1]
+        tot_tax_pct = igst_pct or (cgst_pct + sgst_pct + utgst_pct)
 
-        # Fallback: Total percentage match if specific components not found
-        if not matched_taxes:
-            tot_pct = round((igst_pct or (cgst_pct + sgst_pct + utgst_pct)), 2)
-            if tot_pct > 0:
-                tot_taxes = Tax.search(domain + [('amount', '=', tot_pct)], limit=1)
-                if tot_taxes:
-                    matched_taxes |= tot_taxes
+        if is_intra:
+            # --- INTRA-STATE (Amazon intra: Kerala -> Kerala) ---
+            # MUST apply CGST + SGST (or Group Tax). CANNOT apply IGST!
+            half_pct = round(tot_tax_pct / 2.0, 2) if tot_tax_pct else (cgst_pct or sgst_pct)
+
+            if half_pct > 0:
+                # 1. Look for CGST tax (e.g. amount == 9.0%, name contains 'CGST')
+                cgst_taxes = Tax.search(domain + [('amount', '=', half_pct)]).filtered(lambda t: 'CGST' in t.name.upper())
+                if cgst_taxes:
+                    matched_taxes |= cgst_taxes[:1]
+
+                # 2. Look for SGST / UTGST tax (e.g. amount == 9.0%, name contains 'SGST' or 'UTGST')
+                sgst_taxes = Tax.search(domain + [('amount', '=', half_pct)]).filtered(lambda t: ('SGST' in t.name.upper() or 'UTGST' in t.name.upper()))
+                if sgst_taxes:
+                    matched_taxes |= sgst_taxes[:1]
+
+            # 3. Fallback: Look for Intra Group Tax
+            if not matched_taxes and tot_tax_pct > 0:
+                group_taxes = Tax.search(domain + [('amount_type', '=', 'group')]).filtered(lambda t: 'IGST' not in t.name.upper() and ('CGST' in t.name.upper() or 'SGST' in t.name.upper() or 'GST' in t.name.upper()))
+                if group_taxes:
+                    matched_taxes |= group_taxes[:1]
+
+        else:
+            # --- INTER-STATE (Amazon inter: Kerala -> Outside Kerala) ---
+            # MUST apply IGST. CANNOT apply CGST/SGST split!
+            if tot_tax_pct > 0:
+                igst_taxes = Tax.search(domain + [('amount', '=', tot_tax_pct)]).filtered(lambda t: 'IGST' in t.name.upper())
+                if not igst_taxes:
+                    igst_taxes = Tax.search(domain + [('amount', '=', tot_tax_pct)]).filtered(lambda t: 'INTER' in t.name.upper() or 'OUTSIDE' in t.name.upper())
+                if not igst_taxes:
+                    igst_taxes = Tax.search(domain + [('amount', '=', tot_tax_pct)])
+                if igst_taxes:
+                    matched_taxes |= igst_taxes[:1]
 
         return matched_taxes
 
@@ -225,8 +258,11 @@ class AmazonDashboardRecord(models.Model):
                 product = rec._find_product_by_sku(rec.sku, rec.item_description, rec.hsn_sac, rec.asin, rec.product_tax_code)
                 rec.product_id = product.id
 
+                st_clean = (rec.ship_to_state or '').strip().lower()
+                is_intra = 'kerala' in st_clean or st_clean in ('kl', 'kerala')
+
                 partner = rec._get_or_create_partner(rec.ship_to_state)
-                taxes = rec._find_matching_taxes(company, rec.cgst_rate, rec.sgst_rate, rec.igst_rate, rec.utgst_rate)
+                taxes = rec._find_matching_taxes(company, rec.cgst_rate, rec.sgst_rate, rec.igst_rate, rec.utgst_rate, is_intra=is_intra)
 
                 qty = rec.quantity if rec.quantity > 0 else 1.0
                 unit_price = abs(rec.tax_exclusive_gross / qty) if rec.tax_exclusive_gross else 0.0
@@ -240,45 +276,35 @@ class AmazonDashboardRecord(models.Model):
                     'origin': rec.shipment_id or f"Amazon Order {rec.order_id}",
                     'order_line': [(0, 0, {
                         'product_id': product.id,
-                        'name': rec.item_description or product.name,
+                        'name': rec.item_description or f"Amazon Item {rec.sku}",
                         'product_uom_qty': qty,
-                        'product_uom_id': product.uom_id.id if product.uom_id else False,
                         'price_unit': unit_price,
-                        'tax_ids': [(6, 0, taxes.ids)],
+                        'tax_ids': [(6, 0, taxes.ids)] if taxes else False,
                     })],
                 }
 
                 so = self.env['sale.order'].create(so_vals)
                 so.action_confirm()
 
-                # Update Picking
-                picking = so.picking_ids[:1]
-                if picking:
-                    if rec.shipment_date:
-                        picking.scheduled_date = rec.shipment_date
-                    picking.amazon_shipment_id = rec.shipment_id
-                    
-                    # Update stock moves
-                    for move in picking.move_ids:
-                        move.amazon_shipment_item_id = rec.shipment_item_id
-                        move.quantity = qty
+                # Auto Process Delivery Picking
+                for picking in so.picking_ids:
+                    if picking.state not in ('done', 'cancel'):
+                        for move in picking.move_ids:
+                            move.quantity = move.product_uom_qty
+                        try:
+                            picking.button_validate()
+                        except Exception as pe:
+                            _logger.warning(f"Could not auto-validate picking {picking.name}: {pe}")
 
-                    # Attempt picking validation
-                    try:
-                        picking.button_validate()
-                    except Exception as pe:
-                        _logger.warning(f"Could not auto-validate picking {picking.name}: {pe}")
-
-                # Create & Post Invoice
+                # Auto Create & Post Invoice
                 invoice = so._create_invoices()
                 if invoice:
                     invoice.write({
-                        'amazon_invoice_number': rec.invoice_number,
                         'amazon_order_id': rec.order_id,
-                        'ref': rec.invoice_number or rec.order_id,
+                        'amazon_invoice_number': rec.invoice_number,
+                        'ref': rec.invoice_number or rec.shipment_id or rec.order_id,
+                        'invoice_date': rec.invoice_date.date() if rec.invoice_date else fields.Date.today(),
                     })
-                    if rec.invoice_date:
-                        invoice.invoice_date = rec.invoice_date.date()
                     try:
                         invoice.action_post()
                     except Exception as ie:
@@ -286,11 +312,14 @@ class AmazonDashboardRecord(models.Model):
 
                 rec.write({
                     'sale_order_id': so.id,
-                    'picking_id': picking.id if picking else False,
-                    'invoice_id': invoice.id if invoice else False,
                     'state': 'so_created',
                     'error_message': False,
                 })
+
+                return {
+                    'res_id': so.id,
+                    'name': so.name,
+                }
 
             except Exception as e:
                 _logger.exception(f"Error creating Sale Order for record {rec.id}: {e}")
@@ -298,8 +327,9 @@ class AmazonDashboardRecord(models.Model):
                     'state': 'error',
                     'error_message': str(e)
                 })
+                raise UserError(_("Could not create Sale Order for Order '%s': %s") % (rec.order_id, e))
 
-    def action_create_refund(self):
+    def action_create_refund(self, force_direct=False):
         """ Create & Link Refund (Credit Note) for Refund transaction """
         for rec in self:
             if rec.transaction_type != 'Refund':
@@ -326,18 +356,48 @@ class AmazonDashboardRecord(models.Model):
                     ('invoice_number', '=', rec.invoice_number)
                 ], limit=1)
 
-                # Step 3: Require Sale Order / Invoice to be created first!
-                if not origin_so and not origin_inv:
-                    if shipment_history:
-                        raise UserError(_("Sale Order has not been created yet for Order ID '%s' (Invoice: %s). Please create the Sale Order for the Shipment first before creating the Refund.") % (rec.order_id, rec.invoice_number or 'N/A'))
-                    else:
-                        raise UserError(_("No created Sale Order or Invoice found for Order ID '%s'. Please create the Sale Order first before creating the Refund.") % rec.order_id)
+                # Step 3: Interactive Confirmation Wizard if force_direct is False and Sale Order/Invoice is not created yet
+                if not force_direct and not origin_so and not origin_inv:
+                    if shipment_history and shipment_history.state != 'so_created':
+                        wiz = self.env['amazon.refund.confirmation.wizard'].create({
+                            'record_id': rec.id,
+                            'shipment_record_id': shipment_history.id,
+                            'wizard_type': 'so_pending',
+                            'message': _("Sale Order for Order ID '%s' (Invoice: %s) has not been created yet.\n\nClick 'Create Sale Order First & Refund' to process the shipment first, or click 'Create Direct Credit Note'.") % (rec.order_id, rec.invoice_number or 'N/A'),
+                        })
+                        return {
+                            'name': _('Refund Creation Confirmation'),
+                            'type': 'ir.actions.act_window',
+                            'res_model': 'amazon.refund.confirmation.wizard',
+                            'res_id': wiz.id,
+                            'views': [(False, 'form')],
+                            'view_mode': 'form',
+                            'target': 'new',
+                        }
+                    elif not shipment_history:
+                        wiz = self.env['amazon.refund.confirmation.wizard'].create({
+                            'record_id': rec.id,
+                            'wizard_type': 'no_so_found',
+                            'message': _("No prior Sale Order or Shipment record found for Order ID '%s'.\n\nDo you want to create a direct standalone Credit Note?") % rec.order_id,
+                        })
+                        return {
+                            'name': _('Refund Creation Confirmation'),
+                            'type': 'ir.actions.act_window',
+                            'res_model': 'amazon.refund.confirmation.wizard',
+                            'res_id': wiz.id,
+                            'views': [(False, 'form')],
+                            'view_mode': 'form',
+                            'target': 'new',
+                        }
+
+                st_clean = (rec.ship_to_state or '').strip().lower()
+                is_intra = 'kerala' in st_clean or st_clean in ('kl', 'kerala')
 
                 partner = origin_inv.partner_id or origin_so.partner_id or rec._get_or_create_partner(rec.ship_to_state)
                 product = rec._find_product_by_sku(rec.sku, rec.item_description, rec.hsn_sac, rec.asin, rec.product_tax_code)
                 rec.product_id = product.id
 
-                taxes = rec._find_matching_taxes(company, rec.cgst_rate, rec.sgst_rate, rec.igst_rate, rec.utgst_rate)
+                taxes = rec._find_matching_taxes(company, rec.cgst_rate, rec.sgst_rate, rec.igst_rate, rec.utgst_rate, is_intra=is_intra)
                 qty = abs(rec.quantity) if rec.quantity else 1.0
                 unit_price = abs(rec.tax_exclusive_gross / qty) if rec.tax_exclusive_gross else 0.0
 
@@ -355,7 +415,7 @@ class AmazonDashboardRecord(models.Model):
                         'name': rec.item_description or f"Refund for Order {rec.order_id}",
                         'quantity': qty,
                         'price_unit': unit_price,
-                        'tax_ids': [(6, 0, taxes.ids)],
+                        'tax_ids': [(6, 0, taxes.ids)] if taxes else False,
                     })],
                 }
 
@@ -374,12 +434,18 @@ class AmazonDashboardRecord(models.Model):
                     'error_message': False,
                 })
 
+                return {
+                    'res_id': refund_move.id,
+                    'name': refund_move.name,
+                }
+
             except Exception as e:
                 _logger.exception(f"Error creating Refund for record {rec.id}: {e}")
                 rec.write({
                     'state': 'error',
                     'error_message': str(e)
                 })
+                raise UserError(_("Could not create Refund for Order '%s': %s") % (rec.order_id, e))
 
     def action_bulk_create_sale_orders(self):
         """ Bulk action to create sale orders for all selected shipment records """

@@ -34,6 +34,7 @@ Amazon Sales Dashboard
         'views/account_move_views.xml',
         'views/stock_picking_views.xml',
         'wizard/amazon_csv_import_wizard_views.xml',
+        'wizard/amazon_refund_confirmation_wizard_views.xml',
         'views/amazon_dashboard_record_views.xml',
         'views/menus.xml',
     ],
