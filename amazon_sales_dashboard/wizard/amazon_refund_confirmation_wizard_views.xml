@@ -6,9 +6,31 @@
         <field name="arch" type="xml">
             <form string="Refund Creation Confirmation">
                 <field name="wizard_type" invisible="1"/>
+                <field name="record_id" invisible="1"/>
+                <field name="transaction_type" invisible="1"/>
                 
-                <!-- Alert Banner for Pending SO -->
-                <div invisible="wizard_type != 'so_pending'">
+                <!-- Alert Banner for Confirm Cancel -->
+                <div invisible="wizard_type != 'confirm_cancel'">
+                    <div class="alert alert-danger d-flex align-items-center mb-3" role="alert">
+                        <div>
+                            <h5 class="alert-heading mb-1"><i class="fa fa-exclamation-triangle me-2"></i> Order Cancellation Confirmation</h5>
+                            <span>Are you sure you want to cancel this order, process delivery return to inventory, and reverse invoice?</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alert Banner for Confirm Replace -->
+                <div invisible="transaction_type != 'FreeReplacement'">
+                    <div class="alert alert-info d-flex align-items-center mb-3" role="alert">
+                        <div>
+                            <h5 class="alert-heading mb-1"><i class="fa fa-refresh me-2"></i> Create Free Replacement Order</h5>
+                            <span>Enter the unit price and order reference to create, deliver, and invoice a new replacement Sale Order.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alert Banner for Pending SO (Cancel / Refund only) -->
+                <div invisible="wizard_type != 'so_pending' or transaction_type == 'FreeReplacement'">
                     <div class="alert alert-warning d-flex align-items-center mb-3" role="alert">
                         <div>
                             <h5 class="alert-heading mb-1"><i class="fa fa-exclamation-triangle me-2"></i> Sale Order Not Created Yet</h5>
@@ -17,8 +39,8 @@
                     </div>
                 </div>
 
-                <!-- Alert Banner for No SO Found -->
-                <div invisible="wizard_type != 'no_so_found'">
+                <!-- Alert Banner for No SO Found (Refund) -->
+                <div invisible="wizard_type != 'no_so_found' or transaction_type != 'Refund'">
                     <div class="alert alert-info d-flex align-items-center mb-3" role="alert">
                         <div>
                             <h5 class="alert-heading mb-1"><i class="fa fa-info-circle me-2"></i> No Sale Order Found</h5>
@@ -27,23 +49,42 @@
                     </div>
                 </div>
 
-                <group>
-                    <field name="message" readonly="1" nolabel="1" style="font-size: 1.05rem; font-weight: 500; color: #334155; border: none; background: transparent;"/>
+                <!-- Alert Banner for No SO Found (Cancel only) -->
+                <div invisible="wizard_type != 'no_so_found' or transaction_type in ('Refund', 'FreeReplacement')">
+                    <div class="alert alert-danger d-flex align-items-center mb-3" role="alert">
+                        <div>
+                            <h5 class="alert-heading mb-1"><i class="fa fa-times-circle me-2"></i> Cannot Process Transaction</h5>
+                            <span>You cannot process this transaction because no prior Sale Order or Shipment history was found against this order.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Full width message text -->
+                <div class="mb-3" invisible="transaction_type == 'FreeReplacement'">
+                    <field name="message" readonly="1" nolabel="1" style="font-size: 1rem; font-weight: 500; color: #334155; border: none; background: transparent; display: block; width: 100%; white-space: pre-line; margin-bottom: 0;"/>
+                </div>
+
+                <!-- Price and Reference input fields for Replacement -->
+                <group invisible="transaction_type != 'FreeReplacement'">
+                    <field name="replacement_unit_price" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                    <field name="replacement_ref" placeholder="e.g. Free Replacement for Order #405-9988776-1234567"/>
                 </group>
 
                 <footer>
-                    <!-- Buttons when Sale Order is Pending -->
-                    <t invisible="wizard_type != 'so_pending'">
-                        <button name="action_create_so_then_refund" string="Create Sale Order First &amp; Refund" type="object" class="btn-primary"/>
-                        <button name="action_create_direct_refund" string="Create Direct Credit Note" type="object" class="btn-warning"/>
-                    </t>
+                    <!-- Confirm Cancel Button -->
+                    <button name="action_confirm_cancel" string="Confirm &amp; Cancel Order" type="object" class="btn-danger" invisible="wizard_type != 'confirm_cancel'"/>
 
-                    <!-- Buttons when No Sale Order Found -->
-                    <t invisible="wizard_type != 'no_so_found'">
-                        <button name="action_create_direct_refund" string="Create Direct Credit Note" type="object" class="btn-warning"/>
-                    </t>
+                    <!-- Confirm Replace Button -->
+                    <button name="action_confirm_replace" string="Create Replacement Sale Order" type="object" class="btn-primary" invisible="transaction_type != 'FreeReplacement'"/>
 
-                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                    <!-- Buttons for Refund -->
+                    <button name="action_create_so_then_refund" string="Create Sale Order First &amp; Refund" type="object" class="btn-primary" invisible="wizard_type != 'so_pending' or transaction_type != 'Refund'"/>
+                    <button name="action_create_direct_refund" string="Create Direct Credit Note" type="object" class="btn-warning" invisible="wizard_type not in ('so_pending', 'no_so_found') or transaction_type != 'Refund'"/>
+
+                    <!-- Buttons for Cancel -->
+                    <button name="action_create_so_then_cancel" string="Create Sale Order First &amp; Cancel" type="object" class="btn-primary" invisible="wizard_type != 'so_pending' or transaction_type != 'Cancel'"/>
+
+                    <button string="Close" class="btn-secondary" special="cancel"/>
                 </footer>
             </form>
         </field>

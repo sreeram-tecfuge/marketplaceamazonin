@@ -17,7 +17,9 @@ class AmazonDashboardRecord(models.Model):
     invoice_date = fields.Datetime(string="Invoice Date")
     transaction_type = fields.Selection([
         ('Shipment', 'Shipment'),
-        ('Refund', 'Refund')
+        ('Refund', 'Refund'),
+        ('Cancel', 'Cancel'),
+        ('FreeReplacement', 'Free Replacement')
     ], string="Transaction Type", required=True, index=True)
     order_id = fields.Char(string="Order ID", index=True)
     shipment_id = fields.Char(string="Shipment ID", index=True)
@@ -86,6 +88,8 @@ class AmazonDashboardRecord(models.Model):
         ('draft', 'Pending'),
         ('so_created', 'SO Created'),
         ('refund_created', 'Refund Created'),
+        ('cancelled', 'Cancelled'),
+        ('replacement_created', 'Replacement Created'),
         ('error', 'Error')
     ], string="Status", default='draft', required=True, index=True)
     error_message = fields.Text(string="Error Log")
@@ -460,6 +464,332 @@ class AmazonDashboardRecord(models.Model):
                 })
                 raise UserError(_("Could not create Refund for Order '%s': %s") % (rec.order_id, e))
 
+    def action_process_cancel(self, force_direct=False):
+        """ Cancel transaction workflow: Stock Return for done delivery, Credit Note if invoice exists, and cancel Sale Order """
+        for rec in self:
+            if rec.transaction_type != 'Cancel':
+                raise UserError(_("Record %s is not a Cancel transaction.") % rec.name)
+
+            try:
+                company = self.env.company
+
+                # Step 1: Find existing Sale Order for this order_id
+                origin_so = self.env['sale.order'].search([('amazon_order_id', '=', rec.order_id)], limit=1)
+
+                # Step 2: Find existing Invoice for this order_id or invoice_number
+                inv_domain = [('move_type', '=', 'out_invoice')]
+                if rec.invoice_number:
+                    inv_domain.append(('amazon_invoice_number', '=', rec.invoice_number))
+                else:
+                    inv_domain.append(('amazon_order_id', '=', rec.order_id))
+                origin_inv = self.env['account.move'].search(inv_domain, limit=1)
+
+                # Step 3: Check Amazon transaction history for matching Shipment record
+                shipment_history = self.search([
+                    ('transaction_type', '=', 'Shipment'),
+                    '|',
+                    ('order_id', '=', rec.order_id),
+                    ('invoice_number', '=', rec.invoice_number)
+                ], limit=1)
+
+                # Step 4: Interactive Confirmation Wizard if force_direct is False
+                if not force_direct:
+                    if origin_so or origin_inv:
+                        so_ref = origin_so.name if origin_so else (origin_inv.name if origin_inv else rec.order_id)
+                        wiz = self.env['amazon.refund.confirmation.wizard'].create({
+                            'record_id': rec.id,
+                            'shipment_record_id': shipment_history.id if shipment_history else False,
+                            'wizard_type': 'confirm_cancel',
+                            'message': _("Sale Order / Invoice '%s' exists for Order ID '%s'.\n\nClick 'Confirm & Cancel Order' to return delivered stock to inventory, reverse invoice (Credit Note), and cancel the Sale Order.") % (so_ref, rec.order_id),
+                        })
+                        return {
+                            'name': _('Cancellation Confirmation'),
+                            'type': 'ir.actions.act_window',
+                            'res_model': 'amazon.refund.confirmation.wizard',
+                            'res_id': wiz.id,
+                            'views': [(False, 'form')],
+                            'view_mode': 'form',
+                            'target': 'new',
+                        }
+                    elif shipment_history and shipment_history.state != 'so_created':
+                        wiz = self.env['amazon.refund.confirmation.wizard'].create({
+                            'record_id': rec.id,
+                            'shipment_record_id': shipment_history.id,
+                            'wizard_type': 'so_pending',
+                            'message': _("Sale Order for Order ID '%s' (Invoice: %s) has not been created yet.\n\nClick 'Create Sale Order First & Cancel' to process the shipment first.") % (rec.order_id, rec.invoice_number or 'N/A'),
+                        })
+                        return {
+                            'name': _('Cancellation Confirmation'),
+                            'type': 'ir.actions.act_window',
+                            'res_model': 'amazon.refund.confirmation.wizard',
+                            'res_id': wiz.id,
+                            'views': [(False, 'form')],
+                            'view_mode': 'form',
+                            'target': 'new',
+                        }
+                    else:
+                        wiz = self.env['amazon.refund.confirmation.wizard'].create({
+                            'record_id': rec.id,
+                            'wizard_type': 'no_so_found',
+                            'message': _("You cannot cancel this order because no Sale Order or Shipment history was found against Order ID '%s'.") % rec.order_id,
+                        })
+                        return {
+                            'name': _('Cannot Cancel Order'),
+                            'type': 'ir.actions.act_window',
+                            'res_model': 'amazon.refund.confirmation.wizard',
+                            'res_id': wiz.id,
+                            'views': [(False, 'form')],
+                            'view_mode': 'form',
+                            'target': 'new',
+                        }
+
+                # Step 3: Handle Delivery Picking Return / Cancellation
+                if origin_so and origin_so.picking_ids:
+                    for picking in origin_so.picking_ids:
+                        if picking.state == 'done':
+                            # Create Stock Return Picking using default_get
+                            return_wiz_model = self.env['stock.return.picking'].with_context(active_id=picking.id, active_model='stock.picking')
+                            return_wiz_vals = return_wiz_model.default_get(list(return_wiz_model._fields))
+                            return_wizard = return_wiz_model.create(return_wiz_vals)
+
+                            # Ensure product return lines have non-zero quantities
+                            for rline in return_wizard.product_return_moves:
+                                if rline.quantity <= 0 and rline.move_id:
+                                    rline.quantity = rline.move_id.quantity or rline.move_id.product_uom_qty
+
+                            try:
+                                return_res = return_wizard.action_create_returns()
+                                return_picking_id = return_res.get('res_id')
+                                if return_picking_id:
+                                    return_picking = self.env['stock.picking'].browse(return_picking_id)
+                                    for rmove in return_picking.move_ids:
+                                        rmove.quantity = rmove.product_uom_qty
+                                    try:
+                                        return_picking.button_validate()
+                                    except Exception as rpe:
+                                        _logger.warning(f"Could not auto-validate return picking {return_picking.name}: {rpe}")
+                            except Exception as rwe:
+                                _logger.warning(f"Could not create stock return picking for {picking.name}: {rwe}")
+                        elif picking.state not in ('done', 'cancel'):
+                            try:
+                                picking.action_cancel()
+                            except Exception as pe:
+                                _logger.warning(f"Could not cancel picking {picking.name}: {pe}")
+
+                # Step 4: Handle Invoice Reversal (Credit Note) if Invoice exists
+                refund_move = False
+                if origin_inv and origin_inv.state == 'posted':
+                    # 1. Search for existing Credit Note linked to this invoice or order
+                    existing_cn = self.env['account.move'].search([
+                        ('move_type', '=', 'out_refund'),
+                        ('state', '!=', 'cancel'),
+                        '|',
+                        ('reversed_entry_id', '=', origin_inv.id),
+                        ('amazon_order_id', '=', rec.order_id)
+                    ], limit=1)
+
+                    if existing_cn:
+                        refund_move = existing_cn
+                    else:
+                        # 2. Check if a Refund dashboard record already created a credit note
+                        refund_rec = self.search([
+                            ('transaction_type', '=', 'Refund'),
+                            ('order_id', '=', rec.order_id),
+                            ('state', '=', 'refund_created')
+                        ], limit=1)
+                        if refund_rec and refund_rec.refund_move_id:
+                            refund_move = refund_rec.refund_move_id
+                        else:
+                            # 3. Create a new Credit Note if none exists
+                            partner = origin_inv.partner_id or rec._get_or_create_partner(rec.ship_to_state)
+                            product = rec._find_product_by_sku(rec.sku, rec.item_description, rec.hsn_sac, rec.asin, rec.product_tax_code)
+                            rec.product_id = product.id
+                            taxes = rec._find_matching_taxes(company, rec.cgst_rate, rec.sgst_rate, rec.igst_rate, rec.utgst_rate)
+
+                            qty = abs(rec.quantity) if rec.quantity else 1.0
+                            unit_price = abs(rec.tax_exclusive_gross / qty) if rec.tax_exclusive_gross else (origin_inv.invoice_line_ids[:1].price_unit or 0.0)
+
+                            refund_vals = {
+                                'move_type': 'out_refund',
+                                'partner_id': partner.id,
+                                'ref': rec.credit_note_no or f"Cancel Order {rec.order_id}",
+                                'reversed_entry_id': origin_inv.id,
+                                'invoice_date': rec.invoice_date.date() if rec.invoice_date else fields.Date.today(),
+                                'invoice_line_ids': [(0, 0, {
+                                    'product_id': product.id,
+                                    'name': rec.item_description or f"Cancellation for Order {rec.order_id}",
+                                    'quantity': qty,
+                                    'price_unit': unit_price,
+                                    'tax_ids': [(6, 0, taxes.ids)] if taxes else False,
+                                })],
+                            }
+                            if 'amazon_order_id' in self.env['account.move']._fields:
+                                refund_vals['amazon_order_id'] = rec.order_id
+                            if 'amazon_invoice_number' in self.env['account.move']._fields:
+                                refund_vals['amazon_invoice_number'] = rec.invoice_number
+
+                            refund_move = self.env['account.move'].create(refund_vals)
+                            try:
+                                refund_move.action_post()
+                            except Exception as rne:
+                                _logger.warning(f"Could not auto-post cancellation credit note {refund_move.name}: {rne}")
+
+                # Step 5: Cancel Sale Order
+                if origin_so and origin_so.state not in ('cancel'):
+                    try:
+                        origin_so.action_cancel()
+                    except Exception as se:
+                        _logger.warning(f"Could not cancel Sale Order {origin_so.name}: {se}")
+
+                rec.write({
+                    'refund_move_id': refund_move.id if refund_move else False,
+                    'state': 'cancelled',
+                    'error_message': False,
+                })
+
+                return {
+                    'res_id': origin_so.id if origin_so else False,
+                    'name': origin_so.name if origin_so else 'Cancelled',
+                }
+
+            except Exception as e:
+                _logger.exception(f"Error cancelling Order for record {rec.id}: {e}")
+                rec.write({
+                    'state': 'error',
+                    'error_message': str(e)
+                })
+                raise UserError(_("Could not process Cancellation for Order '%s': %s") % (rec.order_id, e))
+
+    def action_create_free_replacement(self, force_direct=False, replacement_unit_price=None, replacement_ref=None):
+        """ Standalone Free Replacement transaction workflow:
+            1. If force_direct is False, open wizard to prompt user for replacement unit price & reference string.
+            2. Create new Replacement Sale Order directly (no prerequisite checks for shipment/refund).
+            3. Use product's default customer taxes for company.
+            4. Deliver replacement product from stock.
+            5. Create & post new replacement invoice (if invoice_number present).
+            6. Update status to replacement_created.
+        """
+        for rec in self:
+            if rec.transaction_type != 'FreeReplacement':
+                raise UserError(_("Record %s is not a Free Replacement transaction.") % rec.name)
+
+            try:
+                company = self.env.company
+
+                # Step 1: Open interactive input wizard if force_direct is False
+                if not force_direct:
+                    calc_default_price = abs(rec.tax_exclusive_gross / rec.quantity) if (rec.tax_exclusive_gross and rec.quantity) else 0.0
+                    
+                    wiz = self.env['amazon.refund.confirmation.wizard'].create({
+                        'record_id': rec.id,
+                        'wizard_type': 'confirm_replace',
+                        'replacement_unit_price': calc_default_price,
+                        'replacement_ref': False,
+                        'message': _("Enter the unit price and order reference to create, deliver, and invoice a new replacement Sale Order for Order ID '%s'.") % rec.order_id,
+                    })
+                    return {
+                        'name': _('Create Free Replacement Order'),
+                        'type': 'ir.actions.act_window',
+                        'res_model': 'amazon.refund.confirmation.wizard',
+                        'res_id': wiz.id,
+                        'views': [(False, 'form')],
+                        'view_mode': 'form',
+                        'target': 'new',
+                    }
+
+                # Step 2: Create New Replacement Sale Order (Standalone)
+                product = rec._find_product_by_sku(rec.sku, rec.item_description, rec.hsn_sac, rec.asin, rec.product_tax_code)
+                rec.product_id = product.id
+                partner = rec._get_or_create_partner(rec.ship_to_state)
+
+                # Use product's default customer tax for the company
+                product_default_taxes = product.taxes_id.filtered(lambda t: t.company_id == company)
+
+                qty = rec.quantity if rec.quantity > 0 else 1.0
+
+                # Determine unit price: custom replacement_unit_price from wizard if provided, else record price
+                if replacement_unit_price is not None:
+                    unit_price = float(replacement_unit_price)
+                elif rec.tax_exclusive_gross:
+                    unit_price = abs(rec.tax_exclusive_gross / qty)
+                else:
+                    unit_price = 0.0
+
+                # Determine reference string: custom replacement_ref from wizard if provided, else empty
+                so_origin_ref = replacement_ref or False
+
+                so_vals = {
+                    'partner_id': partner.id,
+                    'date_order': rec.order_date or fields.Datetime.now(),
+                    'client_order_ref': f"FBA-REPLACE-{rec.order_id}",
+                    'origin': so_origin_ref,
+                    'order_line': [(0, 0, {
+                        'product_id': product.id,
+                        'name': f"[REPLACEMENT] {rec.item_description or rec.sku}",
+                        'product_uom_qty': qty,
+                        'price_unit': unit_price,
+                        'tax_ids': [(6, 0, product_default_taxes.ids)] if product_default_taxes else False,
+                    })],
+                }
+
+                if 'amazon_order_id' in self.env['sale.order']._fields:
+                    so_vals['amazon_order_id'] = rec.order_id
+                if 'amazon_shipment_id' in self.env['sale.order']._fields:
+                    so_vals['amazon_shipment_id'] = rec.shipment_id
+
+                new_so = self.env['sale.order'].create(so_vals)
+                new_so.action_confirm()
+
+                # Step 3: Auto Process Delivery Picking for Replacement product
+                for picking in new_so.picking_ids:
+                    if picking.state not in ('done', 'cancel'):
+                        for move in picking.move_ids:
+                            move.quantity = move.product_uom_qty
+                        try:
+                            picking.button_validate()
+                        except Exception as pe:
+                            _logger.warning(f"Could not auto-validate replacement picking {picking.name}: {pe}")
+
+                # Step 4: Auto Create & Post Invoice for Replacement product
+                if rec.invoice_number and str(rec.invoice_number).strip():
+                    new_inv = new_so._create_invoices()
+                    if new_inv:
+                        inv_write_vals = {
+                            'ref': rec.invoice_number or rec.shipment_id or rec.order_id,
+                            'invoice_date': rec.invoice_date.date() if rec.invoice_date else fields.Date.today(),
+                        }
+                        if 'amazon_order_id' in new_inv._fields:
+                            inv_write_vals['amazon_order_id'] = rec.order_id
+                        if 'amazon_shipment_id' in new_inv._fields:
+                            inv_write_vals['amazon_shipment_id'] = rec.shipment_id
+                        if 'amazon_invoice_number' in new_inv._fields:
+                            inv_write_vals['amazon_invoice_number'] = rec.invoice_number
+
+                        new_inv.write(inv_write_vals)
+                        try:
+                            new_inv.action_post()
+                        except Exception as ie:
+                            _logger.warning(f"Could not auto-post replacement invoice {new_inv.name}: {ie}")
+
+                rec.write({
+                    'sale_order_id': new_so.id,
+                    'state': 'replacement_created',
+                    'error_message': False,
+                })
+
+                return {
+                    'res_id': new_so.id,
+                    'name': new_so.name,
+                }
+
+            except Exception as e:
+                _logger.exception(f"Error processing Free Replacement for record {rec.id}: {e}")
+                rec.write({
+                    'state': 'error',
+                    'error_message': str(e)
+                })
+                raise UserError(_("Could not process Free Replacement for Order '%s': %s") % (rec.order_id, e))
+
     def action_bulk_create_sale_orders(self):
         """ Bulk action to create sale orders for all selected shipment records """
         shipment_recs = self.filtered(lambda r: r.transaction_type == 'Shipment' and r.state in ('draft', 'error'))
@@ -480,12 +810,20 @@ class AmazonDashboardRecord(models.Model):
         records = self.browse(record_ids)
         shipments = records.filtered(lambda r: r.transaction_type == 'Shipment' and r.state in ('draft', 'error'))
         refunds = records.filtered(lambda r: r.transaction_type == 'Refund' and r.state in ('draft', 'error'))
+        cancels = records.filtered(lambda r: r.transaction_type == 'Cancel' and r.state in ('draft', 'error'))
+        replacements = records.filtered(lambda r: r.transaction_type == 'FreeReplacement' and r.state in ('draft', 'error'))
         
         for s in shipments:
             s.action_create_sale_order()
             
         for r in refunds:
             r.action_create_refund()
+
+        for c in cancels:
+            c.action_process_cancel()
+
+        for fr in replacements:
+            fr.action_create_free_replacement()
 
         return True
 
@@ -506,6 +844,8 @@ class AmazonDashboardRecord(models.Model):
 
         shipments = records.filtered(lambda r: r.transaction_type == 'Shipment')
         refunds = records.filtered(lambda r: r.transaction_type == 'Refund')
+        cancels = records.filtered(lambda r: r.transaction_type == 'Cancel')
+        replacements = records.filtered(lambda r: r.transaction_type == 'FreeReplacement')
 
         all_records_data = []
         for rec in records:
@@ -544,9 +884,19 @@ class AmazonDashboardRecord(models.Model):
             'total_shipments_count': len(shipments),
             'total_shipment_amount': round(sum(shipments.mapped('invoice_amount')), 2),
             'pending_shipments_count': len(shipments.filtered(lambda s: s.state in ('draft', 'error'))),
+
             'total_refunds_count': len(refunds),
             'total_refund_amount': round(sum(refunds.mapped('invoice_amount')), 2),
             'pending_refunds_count': len(refunds.filtered(lambda r: r.state in ('draft', 'error'))),
+
+            'total_cancels_count': len(cancels),
+            'total_cancel_amount': round(sum(cancels.mapped('invoice_amount')), 2),
+            'pending_cancels_count': len(cancels.filtered(lambda c: c.state in ('draft', 'error'))),
+
+            'total_replacements_count': len(replacements),
+            'total_replacement_amount': round(sum(replacements.mapped('invoice_amount')), 2),
+            'pending_replacements_count': len(replacements.filtered(lambda r: r.state in ('draft', 'error'))),
+
             'currency_symbol': self.env.company.currency_id.symbol or '₹',
             'latest_batch_id': batch_title,
         }

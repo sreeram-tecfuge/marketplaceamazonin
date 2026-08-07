@@ -66,6 +66,10 @@ export class AmazonSalesDashboard extends Component {
             result = result.filter(r => r.state === "so_created");
         } else if (this.state.statusFilter === "refund_created") {
             result = result.filter(r => r.state === "refund_created");
+        } else if (this.state.statusFilter === "cancelled") {
+            result = result.filter(r => r.state === "cancelled");
+        } else if (this.state.statusFilter === "replacement_created") {
+            result = result.filter(r => r.state === "replacement_created");
         } else if (this.state.statusFilter === "error") {
             result = result.filter(r => r.state === "error");
         }
@@ -260,6 +264,90 @@ export class AmazonSalesDashboard extends Component {
             console.error("Error creating Refund:", error);
             const msg = error.data && error.data.message ? error.data.message : (error.message || String(error));
             this.notification.add(`Error creating Refund: ${msg}`, { type: "danger", sticky: true });
+            await this.loadDashboardData();
+        }
+    }
+
+    async onProcessCancel(recordId) {
+        try {
+            const res = await this.orm.call("amazon.dashboard.record", "action_process_cancel", [[recordId]]);
+            if (res && typeof res === 'object' && res.type === 'ir.actions.act_window') {
+                await this.action.doAction(res, {
+                    onClose: async () => {
+                        await this.loadDashboardData();
+                    }
+                });
+                return;
+            }
+            const docName = res && res.name ? res.name : "Cancelled Order";
+            const soId = res && res.res_id ? res.res_id : false;
+
+            if (soId) {
+                this.notification.add(`Order ${docName} cancelled successfully! Return delivery generated & invoice reversed.`, {
+                    type: "success",
+                    buttons: [{
+                        name: `Open ${docName}`,
+                        onClick: () => {
+                            this.action.doAction({
+                                type: "ir.actions.act_window",
+                                res_model: "sale.order",
+                                res_id: soId,
+                                views: [[false, "form"]],
+                                target: "current",
+                            });
+                        }
+                    }]
+                });
+            } else {
+                this.notification.add("Order cancellation processed successfully!", { type: "success" });
+            }
+            await this.loadDashboardData();
+        } catch (error) {
+            console.error("Error processing Cancel:", error);
+            const msg = error.data && error.data.message ? error.data.message : (error.message || String(error));
+            this.notification.add(`Error processing Cancel: ${msg}`, { type: "danger", sticky: true });
+            await this.loadDashboardData();
+        }
+    }
+
+    async onCreateFreeReplacement(recordId) {
+        try {
+            const res = await this.orm.call("amazon.dashboard.record", "action_create_free_replacement", [[recordId]]);
+            if (res && typeof res === 'object' && res.type === 'ir.actions.act_window') {
+                await this.action.doAction(res, {
+                    onClose: async () => {
+                        await this.loadDashboardData();
+                    }
+                });
+                return;
+            }
+            const soName = res && res.name ? res.name : "Replacement Order";
+            const soId = res && res.res_id ? res.res_id : false;
+
+            if (soId) {
+                this.notification.add(`Free Replacement Order ${soName} & Delivery generated successfully!`, {
+                    type: "success",
+                    buttons: [{
+                        name: `Open ${soName}`,
+                        onClick: () => {
+                            this.action.doAction({
+                                type: "ir.actions.act_window",
+                                res_model: "sale.order",
+                                res_id: soId,
+                                views: [[false, "form"]],
+                                target: "current",
+                            });
+                        }
+                    }]
+                });
+            } else {
+                this.notification.add("Free Replacement Order generated successfully!", { type: "success" });
+            }
+            await this.loadDashboardData();
+        } catch (error) {
+            console.error("Error creating Free Replacement:", error);
+            const msg = error.data && error.data.message ? error.data.message : (error.message || String(error));
+            this.notification.add(`Error creating Free Replacement: ${msg}`, { type: "danger", sticky: true });
             await this.loadDashboardData();
         }
     }

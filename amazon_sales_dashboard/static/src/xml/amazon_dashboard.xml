@@ -38,11 +38,11 @@
 
             <!-- KPI Metric Summary Cards (4 Cards) -->
             <div class="row g-3 mb-4">
-                <!-- Card 1: Total Shipment -->
+                <!-- Card 1: Shipments -->
                 <div class="col-12 col-sm-6 col-xl-3">
                     <div class="kpi-card kpi-blue p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onSelectKpiCard('Shipment', 'all')" title="Click to filter all shipments">
                         <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="text-uppercase fw-semibold tracking-wider text-muted small">Total Shipment</span>
+                            <span class="text-uppercase fw-semibold tracking-wider text-muted small">Total Shipments</span>
                             <div class="kpi-icon-badge bg-blue-subtle text-primary rounded-circle">
                                 <i class="fa fa-truck"></i>
                             </div>
@@ -50,35 +50,20 @@
                         <div class="h3 fw-bold mb-1 text-dark">
                             <t t-esc="state.kpis.total_shipments_count || 0"/> Records
                         </div>
-                        <div class="small fw-semibold text-primary">
-                            Total: <t t-esc="state.kpis.currency_symbol || '₹'"/> <t t-esc="state.kpis.total_shipment_amount || 0"/>
+                        <div class="d-flex justify-content-between align-items-center small fw-semibold">
+                            <span class="text-primary"><t t-esc="state.kpis.currency_symbol || '₹'"/> <t t-esc="state.kpis.total_shipment_amount || 0"/></span>
+                            <span class="badge bg-primary-subtle text-primary rounded-pill" t-on-click.stop="() => this.onSelectKpiCard('Shipment', 'pending')">
+                                <t t-esc="state.kpis.pending_shipments_count || 0"/> Pending
+                            </span>
                         </div>
                     </div>
                 </div>
 
-                <!-- Card 2: Pending Shipment -->
-                <div class="col-12 col-sm-6 col-xl-3">
-                    <div class="kpi-card kpi-emerald p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onSelectKpiCard('Shipment', 'pending')" title="Click to filter pending shipments">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="text-uppercase fw-semibold tracking-wider text-muted small">Pending Shipment</span>
-                            <div class="kpi-icon-badge bg-success-subtle text-success rounded-circle">
-                                <i class="fa fa-clock-o"></i>
-                            </div>
-                        </div>
-                        <div class="h3 fw-bold mb-1 text-dark">
-                            <t t-esc="state.kpis.pending_shipments_count || 0"/> Pending
-                        </div>
-                        <div class="small text-muted">
-                            Ready for Sale Order
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Card 3: Total Refund -->
+                <!-- Card 2: Refunds -->
                 <div class="col-12 col-sm-6 col-xl-3">
                     <div class="kpi-card kpi-amber p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onSelectKpiCard('Refund', 'all')" title="Click to filter all refunds">
                         <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="text-uppercase fw-semibold tracking-wider text-muted small">Total Refund</span>
+                            <span class="text-uppercase fw-semibold tracking-wider text-muted small">Total Refunds</span>
                             <div class="kpi-icon-badge bg-warning-subtle text-warning rounded-circle">
                                 <i class="fa fa-undo"></i>
                             </div>
@@ -86,26 +71,53 @@
                         <div class="h3 fw-bold mb-1 text-dark">
                             <t t-esc="state.kpis.total_refunds_count || 0"/> Records
                         </div>
-                        <div class="small fw-semibold text-warning">
-                            Total: <t t-esc="state.kpis.currency_symbol || '₹'"/> <t t-esc="state.kpis.total_refund_amount || 0"/>
+                        <div class="d-flex justify-content-between align-items-center small fw-semibold">
+                            <span class="text-warning"><t t-esc="state.kpis.currency_symbol || '₹'"/> <t t-esc="state.kpis.total_refund_amount || 0"/></span>
+                            <span class="badge bg-warning-subtle text-warning-emphasis rounded-pill" t-on-click.stop="() => this.onSelectKpiCard('Refund', 'pending')">
+                                <t t-esc="state.kpis.pending_refunds_count || 0"/> Pending
+                            </span>
                         </div>
                     </div>
                 </div>
 
-                <!-- Card 4: Pending Refunds -->
+                <!-- Card 3: Cancels -->
                 <div class="col-12 col-sm-6 col-xl-3">
-                    <div class="kpi-card kpi-purple p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onSelectKpiCard('Refund', 'pending')" title="Click to filter pending refunds">
+                    <div class="kpi-card kpi-purple p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onSelectKpiCard('Cancel', 'all')" title="Click to filter all cancellations">
                         <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="text-uppercase fw-semibold tracking-wider text-muted small">Pending Refunds</span>
+                            <span class="text-uppercase fw-semibold tracking-wider text-muted small">Total Cancels</span>
                             <div class="kpi-icon-badge bg-danger-subtle text-danger rounded-circle">
-                                <i class="fa fa-exclamation-triangle"></i>
+                                <i class="fa fa-times-circle"></i>
                             </div>
                         </div>
                         <div class="h3 fw-bold mb-1 text-dark">
-                            <t t-esc="state.kpis.pending_refunds_count || 0"/> Pending
+                            <t t-esc="state.kpis.total_cancels_count || 0"/> Records
                         </div>
-                        <div class="small text-muted">
-                            Ready for Credit Note
+                        <div class="d-flex justify-content-between align-items-center small fw-semibold">
+                            <span class="text-danger"><t t-esc="state.kpis.currency_symbol || '₹'"/> <t t-esc="state.kpis.total_cancel_amount || 0"/></span>
+                            <span class="badge bg-danger-subtle text-danger rounded-pill" t-on-click.stop="() => this.onSelectKpiCard('Cancel', 'pending')">
+                                <t t-esc="state.kpis.pending_cancels_count || 0"/> Pending
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 4: Free Replacements -->
+                <div class="col-12 col-sm-6 col-xl-3">
+                    <div class="kpi-card kpi-emerald p-3 rounded-4 shadow-sm border-0 position-relative overflow-hidden cursor-pointer" t-on-click="() => this.onSelectKpiCard('FreeReplacement', 'all')" title="Click to filter all replacements">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-uppercase fw-semibold tracking-wider text-muted small">Free Replacements</span>
+                            <div class="kpi-icon-badge bg-info-subtle text-info rounded-circle">
+                                <i class="fa fa-refresh"></i>
+                            </div>
+                        </div>
+                        <div class="h3 fw-bold mb-1 text-dark">
+                            <t t-esc="state.kpis.total_replacements_count || 0"/> Records
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center small fw-semibold">
+                            <span class="text-info"><t t-esc="state.kpis.currency_symbol || '₹'"/> <t t-esc="state.kpis.total_replacement_amount || 0"/></span>
+                            <span class="badge bg-info-subtle text-info rounded-pill" t-on-click.stop="() => this.onSelectKpiCard('FreeReplacement', 'pending')">
+                                <t t-esc="state.kpis.pending_replacements_count || 0"/> Pending
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -129,6 +141,12 @@
                             <button type="button" class="btn rounded-pill px-3 py-1 fw-semibold" t-att-class="state.typeFilter === 'Refund' ? 'btn-warning text-dark' : 'btn-light text-muted'" t-on-click="() => this.onTypeFilterChange('Refund')">
                                 <i class="fa fa-undo me-1"></i> Refund
                             </button>
+                            <button type="button" class="btn rounded-pill px-3 py-1 fw-semibold" t-att-class="state.typeFilter === 'Cancel' ? 'btn-danger' : 'btn-light text-muted'" t-on-click="() => this.onTypeFilterChange('Cancel')">
+                                <i class="fa fa-times-circle me-1"></i> Cancel
+                            </button>
+                            <button type="button" class="btn rounded-pill px-3 py-1 fw-semibold" t-att-class="state.typeFilter === 'FreeReplacement' ? 'btn-info text-white' : 'btn-light text-muted'" t-on-click="() => this.onTypeFilterChange('FreeReplacement')">
+                                <i class="fa fa-refresh me-1"></i> Replacement
+                            </button>
                         </div>
                     </div>
 
@@ -141,18 +159,16 @@
                             <select class="form-select form-select-sm rounded-pill border-secondary-subtle px-3" t-on-change="onStatusFilterChange">
                                 <option value="pending" t-att-selected="state.statusFilter === 'pending'">Pending (Default)</option>
                                 <option value="all" t-att-selected="state.statusFilter === 'all'">All Statuses</option>
-                                <t t-if="state.typeFilter === 'All' or state.typeFilter === 'Shipment'">
-                                    <option value="so_created" t-att-selected="state.statusFilter === 'so_created'">SO Created</option>
-                                </t>
-                                <t t-if="state.typeFilter === 'All' or state.typeFilter === 'Refund'">
-                                    <option value="refund_created" t-att-selected="state.statusFilter === 'refund_created'">Refund Created</option>
-                                </t>
+                                <option value="so_created" t-att-selected="state.statusFilter === 'so_created'">SO Created</option>
+                                <option value="refund_created" t-att-selected="state.statusFilter === 'refund_created'">Refund Created</option>
+                                <option value="cancelled" t-att-selected="state.statusFilter === 'cancelled'">Cancelled</option>
+                                <option value="replacement_created" t-att-selected="state.statusFilter === 'replacement_created'">Replacement Created</option>
                                 <option value="error" t-att-selected="state.statusFilter === 'error'">Error</option>
                             </select>
                         </div>
 
                         <!-- Search Bar -->
-                        <div class="input-group input-group-sm search-box" style="width: 250px;">
+                        <div class="input-group input-group-sm search-box" style="width: 230px;">
                             <span class="input-group-text bg-light border-end-0"><i class="fa fa-search text-muted"></i></span>
                             <input type="text" class="form-control border-start-0 ps-0 bg-light" placeholder="Search Order ID, SKU..." t-att-value="state.searchQuery" t-on-input="onSearchInput"/>
                         </div>
@@ -214,19 +230,29 @@
                                                 <i class="fa fa-truck me-1"></i> Shipment
                                             </span>
                                         </t>
-                                        <t t-else="">
+                                        <t t-elif="rec.transaction_type === 'Refund'">
                                             <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle rounded-pill px-2 py-1">
                                                 <i class="fa fa-undo me-1"></i> Refund
+                                            </span>
+                                        </t>
+                                        <t t-elif="rec.transaction_type === 'Cancel'">
+                                            <span class="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill px-2 py-1">
+                                                <i class="fa fa-times-circle me-1"></i> Cancel
+                                            </span>
+                                        </t>
+                                        <t t-else="">
+                                            <span class="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-2 py-1">
+                                                <i class="fa fa-refresh me-1"></i> Replacement
                                             </span>
                                         </t>
                                     </td>
                                     <td class="fw-bold text-dark"><t t-esc="rec.order_id"/></td>
                                     <td>
-                                        <t t-if="rec.transaction_type === 'Refund'">
-                                            <t t-esc="rec.credit_note_no || rec.invoice_number"/>
+                                        <t t-if="rec.credit_note_no">
+                                            <t t-esc="rec.credit_note_no"/>
                                         </t>
                                         <t t-else="">
-                                            <t t-esc="rec.invoice_number"/>
+                                            <t t-esc="rec.invoice_number || 'N/A'"/>
                                         </t>
                                     </td>
                                     <td class="small text-muted"><t t-esc="rec.order_date"/></td>
@@ -249,6 +275,16 @@
                                                 <i class="fa fa-check me-1"></i> Refund Created
                                             </span>
                                         </t>
+                                        <t t-elif="rec.state === 'cancelled'">
+                                            <span class="badge bg-secondary rounded-pill px-2 py-1">
+                                                <i class="fa fa-times me-1"></i> Cancelled
+                                            </span>
+                                        </t>
+                                        <t t-elif="rec.state === 'replacement_created'">
+                                            <span class="badge bg-primary rounded-pill px-2 py-1">
+                                                <i class="fa fa-refresh me-1"></i> Replacement
+                                            </span>
+                                        </t>
                                         <t t-else="">
                                             <span class="badge bg-danger rounded-pill px-2 py-1 cursor-pointer" t-att-title="rec.error_message || 'Error occurred during creation'" t-on-click="() => this.onInspectRecord(rec.id)">
                                                 <i class="fa fa-exclamation-triangle me-1"></i> Error
@@ -259,13 +295,23 @@
                                         <div class="btn-group btn-group-sm">
                                             <t t-if="rec.state === 'draft' or rec.state === 'error'">
                                                 <t t-if="rec.transaction_type === 'Shipment'">
-                                                    <button class="btn btn-sm btn-primary rounded-pill px-2 py-1 me-1 shadow-xs" t-on-click="() => this.onCreateSaleOrder(rec.id)" title="Create Sale Order + Delivery + Invoice">
+                                                    <button class="btn btn-sm btn-primary rounded-pill px-2 py-1 me-1 shadow-xs" t-on-click="() => this.onCreateSaleOrder(rec.id)" title="Create Sale Order + Delivery (+ Invoice if present)">
                                                         <i class="fa fa-plus-circle me-1"></i> Create SO
                                                     </button>
                                                 </t>
-                                                <t t-else="">
+                                                <t t-elif="rec.transaction_type === 'Refund'">
                                                     <button class="btn btn-sm btn-warning text-dark rounded-pill px-2 py-1 me-1 shadow-xs" t-on-click="() => this.onCreateRefund(rec.id)" title="Create Refund Credit Note">
                                                         <i class="fa fa-undo me-1"></i> Refund
+                                                    </button>
+                                                </t>
+                                                <t t-elif="rec.transaction_type === 'Cancel'">
+                                                    <button class="btn btn-sm btn-danger rounded-pill px-2 py-1 me-1 shadow-xs" t-on-click="() => this.onProcessCancel(rec.id)" title="Cancel Order + Return Delivery + Reverse Invoice">
+                                                        <i class="fa fa-times-circle me-1"></i> Cancel
+                                                    </button>
+                                                </t>
+                                                <t t-elif="rec.transaction_type === 'FreeReplacement'">
+                                                    <button class="btn btn-sm btn-info text-white rounded-pill px-2 py-1 me-1 shadow-xs" t-on-click="() => this.onCreateFreeReplacement(rec.id)" title="Create Free Replacement Sale Order">
+                                                        <i class="fa fa-refresh me-1"></i> Replace
                                                     </button>
                                                 </t>
                                             </t>
@@ -280,7 +326,6 @@
                     </table>
                 </div>
             </div>
-
         </div>
     </t>
 </templates>

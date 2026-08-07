@@ -160,8 +160,8 @@ class AmazonCsvImportWizard(models.TransientModel):
             sku = get_val('sku')
             cn_no = get_val('credit_note_no', is_id=True)
 
-            # Filter ONLY Shipment and Refund transaction types (ignore Cancel and other types)
-            if tx_type not in ('Shipment', 'Refund'):
+            # Allow Shipment, Refund, Cancel, and FreeReplacement transaction types
+            if tx_type not in ('Shipment', 'Refund', 'Cancel', 'FreeReplacement'):
                 ignored_count += 1
                 continue
 
