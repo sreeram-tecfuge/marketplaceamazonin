@@ -9,6 +9,19 @@ from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
+class AmazonCsvImportReplacementLine(models.TransientModel):
+    _name = 'amazon.csv.import.replacement.line'
+    _description = 'Amazon CSV Import Replacement Line'
+
+    wizard_id = fields.Many2one('amazon.csv.import.wizard', string="Wizard", required=True, ondelete='cascade')
+    dashboard_record_id = fields.Many2one('amazon.dashboard.record', string="Dashboard Record", required=True, ondelete='cascade')
+    order_id = fields.Char(string="Order ID", readonly=True)
+    sku = fields.Char(string="SKU", readonly=True)
+    item_description = fields.Text(string="Item Description", readonly=True)
+    amount = fields.Float(string="Amount (Required)", required=True)
+    reference_number = fields.Char(string="Reference Number")
+
+
 class AmazonCsvImportWizard(models.TransientModel):
     _name = 'amazon.csv.import.wizard'
     _description = 'Import Amazon CSV/Excel File'
@@ -28,6 +41,14 @@ class AmazonCsvImportWizard(models.TransientModel):
     duplicate_count = fields.Integer(string="Duplicates Skipped", readonly=True)
     ignored_count = fields.Integer(string="Ignored (Cancel/Other)", readonly=True)
     log_details = fields.Text(string="Import Summary & Duplicate Log", readonly=True)
+
+    replacement_line_ids = fields.One2many('amazon.csv.import.replacement.line', 'wizard_id', string="Replacement Orders")
+    has_replacement_lines = fields.Boolean(string="Has Replacement Lines", compute='_compute_has_replacement_lines')
+
+    @api.depends('replacement_line_ids')
+    def _compute_has_replacement_lines(self):
+        for wiz in self:
+            wiz.has_replacement_lines = bool(wiz.replacement_line_ids)
 
     def _parse_datetime(self, val_str):
         if not val_str or not val_str.strip():
@@ -240,6 +261,18 @@ class AmazonCsvImportWizard(models.TransientModel):
                 record = DashboardRecord.create(vals)
                 created_records |= record
                 imported_count += 1
+
+                if tx_type == 'FreeReplacement':
+                    parsed_amt = self._parse_float(get_val('tax_exclusive_gross')) or self._parse_float(get_val('invoice_amount'))
+                    self.env['amazon.csv.import.replacement.line'].create({
+                        'wizard_id': self.id,
+                        'dashboard_record_id': record.id,
+                        'order_id': order_id,
+                        'sku': sku,
+                        'item_description': get_val('item_description'),
+                        'amount': parsed_amt,
+                        'reference_number': cn_no,
+                    })
             except Exception as pe:
                 log_lines.append(f"• [PARSE ERROR] Order ID: {order_id} | Error: {pe}")
 
@@ -264,3 +297,18 @@ class AmazonCsvImportWizard(models.TransientModel):
             'view_mode': 'form',
             'target': 'new',
         }
+
+    def action_save_replacement_details(self):
+        self.ensure_one()
+        for line in self.replacement_line_ids:
+            if not line.amount or line.amount <= 0:
+                raise UserError(_("Amount is required for replacement record Order ID '%s' (SKU: %s). Please enter a valid amount before completing import.") % (line.order_id, line.sku or 'N/A'))
+            
+            if line.dashboard_record_id:
+                line.dashboard_record_id.write({
+                    'tax_exclusive_gross': line.amount,
+                    'invoice_amount': line.amount,
+                    'principal_amount': line.amount,
+                    'credit_note_no': line.reference_number or '',
+                })
+        return {'type': 'ir.actions.act_window_close'}

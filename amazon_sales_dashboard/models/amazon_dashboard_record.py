@@ -660,14 +660,9 @@ class AmazonDashboardRecord(models.Model):
                 })
                 raise UserError(_("Could not process Cancellation for Order '%s': %s") % (rec.order_id, e))
 
-    def action_create_free_replacement(self, force_direct=False, replacement_unit_price=None, replacement_ref=None):
-        """ Standalone Free Replacement transaction workflow:
-            1. If force_direct is False, open wizard to prompt user for replacement unit price & reference string.
-            2. Create new Replacement Sale Order directly (no prerequisite checks for shipment/refund).
-            3. Use product's default customer taxes for company.
-            4. Deliver replacement product from stock.
-            5. Create & post new replacement invoice (if invoice_number present).
-            6. Update status to replacement_created.
+    def action_create_free_replacement(self):
+        """ Direct Free Replacement transaction workflow:
+            Creates Replacement Sale Order + Delivery (+ Invoice) directly using Amount and Reference Number stored from import.
         """
         for rec in self:
             if rec.transaction_type != 'FreeReplacement':
@@ -676,28 +671,7 @@ class AmazonDashboardRecord(models.Model):
             try:
                 company = self.env.company
 
-                # Step 1: Open interactive input wizard if force_direct is False
-                if not force_direct:
-                    calc_default_price = abs(rec.tax_exclusive_gross / rec.quantity) if (rec.tax_exclusive_gross and rec.quantity) else 0.0
-                    
-                    wiz = self.env['amazon.refund.confirmation.wizard'].create({
-                        'record_id': rec.id,
-                        'wizard_type': 'confirm_replace',
-                        'replacement_unit_price': calc_default_price,
-                        'replacement_ref': False,
-                        'message': _("Enter the unit price and order reference to create, deliver, and invoice a new replacement Sale Order for Order ID '%s'.") % rec.order_id,
-                    })
-                    return {
-                        'name': _('Create Free Replacement Order'),
-                        'type': 'ir.actions.act_window',
-                        'res_model': 'amazon.refund.confirmation.wizard',
-                        'res_id': wiz.id,
-                        'views': [(False, 'form')],
-                        'view_mode': 'form',
-                        'target': 'new',
-                    }
-
-                # Step 2: Create New Replacement Sale Order (Standalone)
+                # Step 1: Create New Replacement Sale Order (Direct)
                 product = rec._find_product_by_sku(rec.sku, rec.item_description, rec.hsn_sac, rec.asin, rec.product_tax_code)
                 rec.product_id = product.id
                 partner = rec._get_or_create_partner(rec.ship_to_state)
@@ -707,22 +681,15 @@ class AmazonDashboardRecord(models.Model):
 
                 qty = rec.quantity if rec.quantity > 0 else 1.0
 
-                # Determine unit price: custom replacement_unit_price from wizard if provided, else record price
-                if replacement_unit_price is not None:
-                    unit_price = float(replacement_unit_price)
-                elif rec.tax_exclusive_gross:
-                    unit_price = abs(rec.tax_exclusive_gross / qty)
-                else:
-                    unit_price = 0.0
-
-                # Determine reference string: custom replacement_ref from wizard if provided, else empty
-                so_origin_ref = replacement_ref or False
+                unit_price = abs(rec.tax_exclusive_gross / qty) if rec.tax_exclusive_gross else 0.0
+                so_origin_ref = rec.credit_note_no or rec.shipment_id or f"Free Replacement for Order {rec.order_id}"
 
                 so_vals = {
                     'partner_id': partner.id,
                     'date_order': rec.order_date or fields.Datetime.now(),
                     'client_order_ref': f"FBA-REPLACE-{rec.order_id}",
                     'origin': so_origin_ref,
+                    'is_amazon_replacement': True,
                     'order_line': [(0, 0, {
                         'product_id': product.id,
                         'name': f"[REPLACEMENT] {rec.item_description or rec.sku}",
@@ -757,6 +724,7 @@ class AmazonDashboardRecord(models.Model):
                         inv_write_vals = {
                             'ref': rec.invoice_number or rec.shipment_id or rec.order_id,
                             'invoice_date': rec.invoice_date.date() if rec.invoice_date else fields.Date.today(),
+                            'is_amazon_replacement': True,
                         }
                         if 'amazon_order_id' in new_inv._fields:
                             inv_write_vals['amazon_order_id'] = rec.order_id

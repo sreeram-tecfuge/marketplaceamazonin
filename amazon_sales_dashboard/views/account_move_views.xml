@@ -8,6 +8,7 @@
             <xpath expr="//field[@name='ref']" position="after">
                 <field name="amazon_invoice_number" readonly="1"/>
                 <field name="amazon_order_id" readonly="1"/>
+                <field name="is_amazon_replacement" readonly="1" invisible="not is_amazon_replacement"/>
                 <field name="credit_note_no" readonly="1" invisible="move_type not in ('out_refund', 'in_refund')"/>
                 <field name="credit_note_date" readonly="1" invisible="move_type not in ('out_refund', 'in_refund')"/>
             </xpath>

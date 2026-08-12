@@ -20,6 +20,7 @@
 
                 <!-- State 2: Results & Duplicate Log -->
                 <div invisible="state != 'result'">
+                    <field name="has_replacement_lines" invisible="1"/>
                     <div class="alert alert-success d-flex align-items-center justify-content-between mb-3" role="alert">
                         <div>
                             <h5 class="alert-heading mb-1"><i class="fa fa-check-circle me-2"></i> CSV Import Complete</h5>
@@ -29,6 +30,14 @@
                             Batch: <field name="import_batch_id" readonly="1" nolabel="1"/>
                         </span>
                     </div>
+
+                    <div invisible="not has_replacement_lines" class="alert alert-warning d-flex align-items-center mb-3" role="alert">
+                        <div>
+                            <h5 class="alert-heading mb-1"><i class="fa fa-exclamation-triangle me-2"></i> Action Required: Free Replacement Order Details</h5>
+                            <span>Please specify the <b>Amount (Required)</b> and <b>Reference Number</b> for each replacement order below.</span>
+                        </div>
+                    </div>
+
                     <group col="4">
                         <field name="import_batch_id" readonly="1"/>
                         <field name="total_rows" readonly="1"/>
@@ -36,13 +45,27 @@
                         <field name="duplicate_count" readonly="1"/>
                         <field name="ignored_count" readonly="1"/>
                     </group>
+
+                    <separator string="Free Replacement Orders (Amount Required)" invisible="not has_replacement_lines"/>
+                    <field name="replacement_line_ids" invisible="not has_replacement_lines" nolabel="1" class="mb-3">
+                        <list editable="bottom" create="0" delete="0">
+                            <field name="order_id" readonly="1"/>
+                            <field name="sku" readonly="1"/>
+                            <field name="item_description" readonly="1"/>
+                            <field name="amount" required="1" string="Amount *"/>
+                            <field name="reference_number" string="Reference Number"/>
+                        </list>
+                    </field>
+
                     <separator string="Duplicate &amp; Error Log"/>
-                    <field name="log_details" readonly="1" nolabel="1" style="font-family: monospace; width: 100%; min-height: 260px; background-color: #f8fafc; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; margin-top: 8px;"/>
+                    <field name="log_details" readonly="1" nolabel="1" style="font-family: monospace; width: 100%; min-height: 180px; background-color: #f8fafc; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; margin-top: 8px;"/>
                 </div>
 
                 <footer>
                     <button name="action_import" string="Upload &amp; Process" type="object" class="btn-primary" invisible="state != 'upload'"/>
-                    <button string="Close" class="btn-secondary" special="cancel"/>
+                    <button name="action_save_replacement_details" string="Confirm &amp; Save Replacement Details" type="object" class="btn-primary" invisible="state != 'result' or not has_replacement_lines"/>
+                    <button string="Close" class="btn-secondary" special="cancel" invisible="state == 'result' and has_replacement_lines"/>
+                    <button string="Close" class="btn-secondary" special="cancel" invisible="state != 'result' or has_replacement_lines"/>
                 </footer>
             </form>
         </field>
