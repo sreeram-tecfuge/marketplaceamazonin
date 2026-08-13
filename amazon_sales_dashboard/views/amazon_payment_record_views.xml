@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Tree View for Payment Records -->
+    <record id="view_amazon_payment_record_tree" model="ir.ui.view">
+        <field name="name">amazon.payment.record.tree</field>
+        <field name="model">amazon.payment.record</field>
+        <field name="arch" type="xml">
+            <list string="Amazon Payment Settlement Records">
+                <field name="settlement_id"/>
+                <field name="order_id"/>
+                <field name="posted_date"/>
+                <field name="transaction_type"/>
+                <field name="amount_type"/>
+                <field name="amount_description"/>
+                <field name="amount" sum="Total Amount"/>
+                <field name="currency_id" column_invisible="1"/>
+                <field name="sku"/>
+                <field name="quantity_purchased"/>
+                <field name="marketplace_name"/>
+                <field name="state" widget="badge" decoration-info="state == 'draft'" decoration-success="state == 'posted' or state == 'payment_created'"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Form View for Payment Record -->
+    <record id="view_amazon_payment_record_form" model="ir.ui.view">
+        <field name="name">amazon.payment.record.form</field>
+        <field name="model">amazon.payment.record</field>
+        <field name="arch" type="xml">
+            <form string="Amazon Payment Settlement Record">
+                <header>
+                    <button name="action_create_journal_entry" string="Create Journal Entry" type="object" class="btn-primary" invisible="move_id"/>
+                    <button name="action_create_payment" string="Create Payment" type="object" class="btn-success" invisible="payment_id"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,posted,journal_created,payment_created"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" readonly="1"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Settlement Information">
+                            <field name="settlement_id"/>
+                            <field name="settlement_start_date"/>
+                            <field name="settlement_end_date"/>
+                            <field name="deposit_date"/>
+                            <field name="total_amount"/>
+                            <field name="currency_id"/>
+                            <field name="currency_code"/>
+                            <field name="import_batch_id"/>
+                        </group>
+                        <group string="Order &amp; Transaction Details">
+                            <field name="order_id"/>
+                            <field name="merchant_order_id"/>
+                            <field name="transaction_type"/>
+                            <field name="shipment_id"/>
+                            <field name="adjustment_id"/>
+                            <field name="marketplace_name"/>
+                            <field name="fulfillment_id"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Financial Amount Breakdown">
+                            <field name="amount_type"/>
+                            <field name="amount_description"/>
+                            <field name="amount"/>
+                            <field name="posted_date"/>
+                            <field name="posted_date_time"/>
+                        </group>
+                        <group string="Item &amp; Promotion">
+                            <field name="order_item_code"/>
+                            <field name="merchant_order_item_id"/>
+                            <field name="merchant_adjustment_item_id"/>
+                            <field name="sku"/>
+                            <field name="quantity_purchased"/>
+                            <field name="promotion_id"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Accounting Links" name="accounting">
+                            <group>
+                                <field name="move_id" readonly="1"/>
+                                <field name="payment_id" readonly="1"/>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Search View -->
+    <record id="view_amazon_payment_record_search" model="ir.ui.view">
+        <field name="name">amazon.payment.record.search</field>
+        <field name="model">amazon.payment.record</field>
+        <field name="arch" type="xml">
+            <search string="Search Payment Settlement Records">
+                <field name="order_id"/>
+                <field name="settlement_id"/>
+                <field name="sku"/>
+                <field name="amount_description"/>
+                <field name="transaction_type"/>
+                <filter string="Principal / Sales" name="filter_principal" domain="[('amount_description', '=', 'Principal')]"/>
+                <filter string="Fees" name="filter_fees" domain="[('amount_description', 'ilike', 'fee')]"/>
+                <filter string="Commission" name="filter_commission" domain="[('amount_description', 'ilike', 'commission')]"/>
+                <separator/>
+                <group>
+                    <filter string="Order ID" name="groupby_order_id" context="{'group_by': 'order_id'}"/>
+                    <filter string="Settlement ID" name="groupby_settlement_id" context="{'group_by': 'settlement_id'}"/>
+                    <filter string="Amount Description" name="groupby_amount_desc" context="{'group_by': 'amount_description'}"/>
+                    <filter string="Transaction Type" name="groupby_trans_type" context="{'group_by': 'transaction_type'}"/>
+                    <filter string="Posted Date" name="groupby_posted_date" context="{'group_by': 'posted_date'}"/>
+                    <filter string="Import Batch" name="groupby_batch" context="{'group_by': 'import_batch_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Pivot View (Pivot table by Order ID & Description, matching Excel image style) -->
+    <record id="view_amazon_payment_record_pivot" model="ir.ui.view">
+        <field name="name">amazon.payment.record.pivot</field>
+        <field name="model">amazon.payment.record</field>
+        <field name="arch" type="xml">
+            <pivot string="Payment Settlement Breakdown" sample="1">
+                <field name="order_id" type="row"/>
+                <field name="amount_description" type="row"/>
+                <field name="amount" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <!-- Action for Payment Records List -->
+    <record id="action_amazon_payment_record_all" model="ir.actions.act_window">
+        <field name="name">Payment Settlement Data List</field>
+        <field name="res_model">amazon.payment.record</field>
+        <field name="view_mode">list,pivot,form</field>
+        <field name="search_view_id" ref="view_amazon_payment_record_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No payment settlement records found!
+            </p>
+            <p>
+                Upload an Amazon Payment Settlement report (Excel/CSV/TSV) to view and manage payment data.
+            </p>
+        </field>
+    </record>
+
+    <!-- Client Action for OWL Payment Dashboard -->
+    <record id="action_amazon_payment_dashboard_client" model="ir.actions.client">
+        <field name="name">Amazon Payment Settlement Dashboard</field>
+        <field name="tag">amazon_payment_dashboard_action</field>
+    </record>
+</odoo>

@@ -4,3 +4,6 @@ access_amazon_dashboard_record_manager,amazon.dashboard.record.manager,model_ama
 access_amazon_csv_import_wizard_user,amazon.csv.import.wizard.user,model_amazon_csv_import_wizard,sales_team.group_sale_salesman,1,1,1,1
 access_amazon_refund_confirmation_wizard_user,amazon.refund.confirmation.wizard.user,model_amazon_refund_confirmation_wizard,sales_team.group_sale_salesman,1,1,1,1
 access_amazon_csv_import_replacement_line_user,amazon.csv.import.replacement.line.user,model_amazon_csv_import_replacement_line,sales_team.group_sale_salesman,1,1,1,1
+access_amazon_payment_record_user,amazon.payment.record.user,model_amazon_payment_record,sales_team.group_sale_salesman,1,1,1,1
+access_amazon_payment_record_manager,amazon.payment.record.manager,model_amazon_payment_record,sales_team.group_sale_manager,1,1,1,1
+access_amazon_payment_import_wizard_user,amazon.payment.import.wizard.user,model_amazon_payment_import_wizard,sales_team.group_sale_salesman,1,1,1,1

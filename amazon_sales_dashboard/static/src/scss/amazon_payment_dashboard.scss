@@ -1,0 +1,95 @@
+/* Amazon Payment Dashboard Styles */
+
+.amazon-payment-dashboard-container {
+    background-color: #f8f9fa;
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+    .dashboard-header {
+        border-color: #e9ecef !important;
+    }
+
+    .btn-gradient-upload {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: #ffffff;
+        font-weight: 600;
+        border: none;
+        transition: all 0.2s ease-in-out;
+
+        &:hover {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            color: #ffffff;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
+        }
+    }
+
+    /* KPI Cards */
+    .kpi-card {
+        background: #ffffff;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        border: 1px solid rgba(0, 0, 0, 0.05) !important;
+
+        &:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08) !important;
+        }
+
+        .kpi-icon-badge {
+            width: 38px;
+            height: 38px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+        }
+
+        &.kpi-emerald {
+            border-left: 4px solid #10b981 !important;
+        }
+
+        &.kpi-blue {
+            border-left: 4px solid #3b82f6 !important;
+        }
+
+        &.kpi-purple {
+            border-left: 4px solid #8b5cf6 !important;
+        }
+
+        &.kpi-amber {
+            border-left: 4px solid #f59e0b !important;
+        }
+
+        &.kpi-rose {
+            border-left: 4px solid #ef4444 !important;
+        }
+    }
+
+    /* Responsive 5-column layout for XL screens */
+    @media (min-width: 1200px) {
+        .col-xl-2-4 {
+            flex: 0 0 auto;
+            width: 20%;
+        }
+    }
+
+    .cursor-pointer {
+        cursor: pointer;
+    }
+
+    .tracking-wider {
+        letter-spacing: 0.05em;
+    }
+
+    .table-success-subtle {
+        background-color: #ecfdf5 !important;
+    }
+
+    /* Search Box */
+    .search-box {
+        .form-control:focus {
+            box-shadow: none;
+            border-color: #ced4da;
+        }
+    }
+}

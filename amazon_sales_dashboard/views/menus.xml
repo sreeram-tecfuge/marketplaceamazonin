@@ -1,51 +1,78 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- Root Menu under Sales -->
+    <!-- Top-Level Application Menu -->
     <menuitem id="menu_amazon_dashboard_root"
-              name="Amazon Dashboard"
-              parent="sale.sale_menu_root"
-              action="action_amazon_dashboard_client"
-              sequence="2"/>
+              name="Amazon Sales &amp; Payments"
+              web_icon="amazon_sales_dashboard,static/description/icon.png"
+              sequence="15"/>
 
-    <!-- Main Dynamic JS Dashboard Action (Latest Upload Only) -->
-    <menuitem id="menu_amazon_dashboard_main_client"
-              name="Latest Upload Dashboard"
+    <!-- ========================================== -->
+    <!-- MENU 1: SALES & ORDERS (CURRENT SALES IMPORT) -->
+    <!-- ========================================== -->
+    <menuitem id="menu_amazon_sales_section"
+              name="Sales &amp; Orders"
               parent="menu_amazon_dashboard_root"
+              sequence="10"/>
+
+    <menuitem id="menu_amazon_dashboard_main_client"
+              name="Latest Sales Dashboard"
+              parent="menu_amazon_sales_section"
               action="action_amazon_dashboard_client"
               sequence="1"/>
 
-    <!-- Dynamic JS Dashboard Action for All Historical Data -->
     <menuitem id="menu_amazon_dashboard_all_client"
-              name="All Data Dashboard"
-              parent="menu_amazon_dashboard_root"
+              name="All Sales Dashboard"
+              parent="menu_amazon_sales_section"
               action="action_amazon_dashboard_all_client"
               sequence="2"/>
 
-    <!-- Submenu: Shipment Data List -->
     <menuitem id="menu_amazon_dashboard_shipment"
               name="Shipment Data List"
-              parent="menu_amazon_dashboard_root"
+              parent="menu_amazon_sales_section"
               action="action_amazon_dashboard_shipment"
-              sequence="2"/>
+              sequence="10"/>
 
-    <!-- Submenu: Refund Data List -->
     <menuitem id="menu_amazon_dashboard_refund"
               name="Refund Data List"
-              parent="menu_amazon_dashboard_root"
+              parent="menu_amazon_sales_section"
               action="action_amazon_dashboard_refund"
-              sequence="3"/>
+              sequence="11"/>
 
-    <!-- Submenu: All Raw Records -->
     <menuitem id="menu_amazon_dashboard_all"
-              name="All Raw Transactions"
-              parent="menu_amazon_dashboard_root"
+              name="All Raw Sales Transactions"
+              parent="menu_amazon_sales_section"
               action="action_amazon_dashboard_all"
-              sequence="4"/>
+              sequence="12"/>
 
-    <!-- Quick Upload Menuitem -->
     <menuitem id="menu_amazon_dashboard_upload"
-              name="Upload CSV/Excel"
-              parent="menu_amazon_dashboard_root"
+              name="Upload Sales Excel/CSV"
+              parent="menu_amazon_sales_section"
               action="action_amazon_csv_import_wizard"
-              sequence="5"/>
+              sequence="20"/>
+
+    <!-- ========================================== -->
+    <!-- MENU 2: PAYMENT SETTLEMENTS (PAYMENT IMPORT) -->
+    <!-- ========================================== -->
+    <menuitem id="menu_amazon_payment_section"
+              name="Payment Settlements"
+              parent="menu_amazon_dashboard_root"
+              sequence="20"/>
+
+    <menuitem id="menu_amazon_payment_dashboard_main"
+              name="Payment Settlement Dashboard"
+              parent="menu_amazon_payment_section"
+              action="action_amazon_payment_dashboard_client"
+              sequence="1"/>
+
+    <menuitem id="menu_amazon_payment_record_list"
+              name="Payment Settlement Data List"
+              parent="menu_amazon_payment_section"
+              action="action_amazon_payment_record_all"
+              sequence="10"/>
+
+    <menuitem id="menu_amazon_payment_upload"
+              name="Upload Payment Excel/CSV"
+              parent="menu_amazon_payment_section"
+              action="action_amazon_payment_import_wizard"
+              sequence="20"/>
 </odoo>

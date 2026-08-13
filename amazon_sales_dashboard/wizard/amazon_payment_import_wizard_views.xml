@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Payment Import Wizard Form View -->
+    <record id="view_amazon_payment_import_wizard_form" model="ir.ui.view">
+        <field name="name">amazon.payment.import.wizard.form</field>
+        <field name="model">amazon.payment.import.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Import Amazon Payment Excel / CSV">
+                <!-- State: Upload -->
+                <group invisible="state != 'upload'">
+                    <div class="alert alert-info" role="alert">
+                        <strong>Upload Amazon Payment Settlement File:</strong><br/>
+                        Upload your Amazon Payment Settlement report (Excel <code>.xlsx</code> / <code>.xls</code>, CSV, or Tab-delimited <code>.txt</code> / <code>.tsv</code> file).
+                    </div>
+                    <group>
+                        <field name="file_data" filename="filename" widget="binary"/>
+                        <field name="filename" invisible="1"/>
+                    </group>
+                </group>
+
+                <!-- State: Result -->
+                <group invisible="state != 'result'">
+                    <div class="alert alert-success" role="alert">
+                        <i class="fa fa-check-circle me-1"></i> Payment Import Completed Successfully!
+                    </div>
+                    <group col="4">
+                        <field name="import_batch_id" readonly="1"/>
+                        <field name="total_rows" readonly="1"/>
+                        <field name="imported_count" readonly="1"/>
+                        <field name="duplicate_count" readonly="1"/>
+                    </group>
+                    <group string="Log &amp; Duplicates Skipped">
+                        <field name="log_details" readonly="1" style="height: 180px; font-family: monospace;"/>
+                    </group>
+                </group>
+
+                <!-- Footer Buttons -->
+                <footer>
+                    <button name="action_import" string="Import Payment File" type="object" class="btn-primary" invisible="state != 'upload'"/>
+                    <button string="Close" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action for Payment Import Wizard -->
+    <record id="action_amazon_payment_import_wizard" model="ir.actions.act_window">
+        <field name="name">Upload Amazon Payment File</field>
+        <field name="res_model">amazon.payment.import.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+</odoo>

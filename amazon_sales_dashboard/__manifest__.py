@@ -18,10 +18,11 @@ Amazon Sales Dashboard
 - Auto mapping of ASIN, Product Tax Code, HSN/SAC, Shipment Item ID, GST Taxes.
     """,
     'author': 'Antigravity AI',
-    'website': 'https://example.com',
+    'website': 'https://tecfuge.com',
     'license': 'LGPL-3',
     'depends': [
         'base',
+        'product',
         'sale_management',
         'stock',
         'account',
@@ -35,7 +36,9 @@ Amazon Sales Dashboard
         'views/stock_picking_views.xml',
         'wizard/amazon_csv_import_wizard_views.xml',
         'wizard/amazon_refund_confirmation_wizard_views.xml',
+        'wizard/amazon_payment_import_wizard_views.xml',
         'views/amazon_dashboard_record_views.xml',
+        'views/amazon_payment_record_views.xml',
         'views/menus.xml',
     ],
     'assets': {
@@ -43,6 +46,9 @@ Amazon Sales Dashboard
             'amazon_sales_dashboard/static/src/scss/amazon_dashboard.scss',
             'amazon_sales_dashboard/static/src/js/amazon_dashboard.js',
             'amazon_sales_dashboard/static/src/xml/amazon_dashboard.xml',
+            'amazon_sales_dashboard/static/src/scss/amazon_payment_dashboard.scss',
+            'amazon_sales_dashboard/static/src/js/amazon_payment_dashboard.js',
+            'amazon_sales_dashboard/static/src/xml/amazon_payment_dashboard.xml',
         ],
     },
     'installable': True,
