@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 from odoo import models, fields, api, _
+from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ class AmazonPaymentRecord(models.Model):
         total_product_tax = 0.0
         total_amazon_fees = 0.0
         total_withheld_taxes = 0.0
+        field_totals_dict = {}
 
         distinct_orders = set()
         order_dict = {}
@@ -89,8 +91,12 @@ class AmazonPaymentRecord(models.Model):
         for rec in records:
             amt = rec.amount or 0.0
             total_payout += amt
-            desc = (rec.amount_description or '').strip()
+            desc = (rec.amount_description or rec.amount_type or 'Other').strip()
+            if not desc:
+                desc = 'Other'
             desc_lower = desc.lower()
+
+            field_totals_dict[desc] = field_totals_dict.get(desc, 0.0) + amt
 
             if rec.order_id:
                 distinct_orders.add(rec.order_id)
@@ -118,25 +124,17 @@ class AmazonPaymentRecord(models.Model):
                 ord_info['descriptions'][desc] += amt
 
             # Categorize KPI amounts
-            if desc_lower == 'principal' or rec.amount_type == 'ItemPrice':
-                if desc_lower == 'principal':
-                    total_principal += amt
-                    if rec.order_id and rec.order_id in order_dict:
-                        order_dict[rec.order_id]['principal'] += amt
-                elif desc_lower == 'product tax' or 'tax' in desc_lower:
-                    total_product_tax += amt
-                    if rec.order_id and rec.order_id in order_dict:
-                        order_dict[rec.order_id]['tax'] += amt
-
-            if 'tax' in desc_lower and desc_lower != 'principal':
-                if 'tcs' in desc_lower or 'tds' in desc_lower:
-                    total_withheld_taxes += amt
-                else:
-                    total_product_tax += amt
+            if desc_lower == 'principal':
+                total_principal += amt
+                if rec.order_id and rec.order_id in order_dict:
+                    order_dict[rec.order_id]['principal'] += amt
+            elif 'tax' in desc_lower and not any(k in desc_lower for k in ['tcs', 'tds']):
+                total_product_tax += amt
                 if rec.order_id and rec.order_id in order_dict:
                     order_dict[rec.order_id]['tax'] += amt
-            
-            if any(k in desc_lower for k in ['commission', 'fee', 'charges', 'postage', 'easyship', 'shipping']):
+            elif any(k in desc_lower for k in ['tcs', 'tds']):
+                total_withheld_taxes += amt
+            elif any(k in desc_lower for k in ['commission', 'fee', 'charges', 'postage', 'easyship', 'shipping', 'fba', 'technology']):
                 total_amazon_fees += amt
                 if rec.order_id and rec.order_id in order_dict:
                     order_dict[rec.order_id]['fees'] += amt
@@ -184,6 +182,13 @@ class AmazonPaymentRecord(models.Model):
 
         currency_symbol = self.env.company.currency_id.symbol or '₹'
 
+        # Format field_totals list for UI KPI Cards
+        field_totals = [
+            {'description': d, 'amount': round(a, 2)}
+            for d, a in field_totals_dict.items()
+        ]
+        field_totals.sort(key=lambda x: (0 if x['description'].lower() == 'principal' else 1, x['description']))
+
         return {
             'kpis': {
                 'total_payout': round(total_payout, 2),
@@ -195,40 +200,206 @@ class AmazonPaymentRecord(models.Model):
                 'total_records_count': len(records),
                 'currency_symbol': currency_symbol,
                 'latest_batch_id': latest_batch,
+                'field_totals': field_totals,
             },
             'orders': orders_list,
             'selected_order': selected_order_data,
             'all_order_ids': sorted(list(all_order_ids)),
         }
 
-    def action_create_journal_entry(self):
-        """ Hook for future Journal Entry creation """
-        for rec in self:
-            if rec.move_id:
-                raise models.UserError(_("Journal entry already created for order %s.") % rec.order_id)
+    @api.model
+    def action_process_full_settlement_reconciliation(self, target_order_id=None):
+        """ Automated 3-Step Accounting Reconciliation for Amazon Settlement:
+            1. Customer Payment Registration + Clearing Write-Off against Customer Invoice
+            2. Amazon Transfer Journal Entry (Clearing Account -> Creditors)
+            3. Amazon Vendor Bill Generation (Dynamic lines per amount_description) & Reconcile
+        """
+        order_id = target_order_id
+        if not order_id and isinstance(self, models.Model) and len(self) > 0:
+            order_id = getattr(self[0], 'order_id', False)
+
+        if not order_id:
+            raise UserError(_("No Amazon Order ID provided for reconciliation."))
+
+        # 1. Check for posted Customer Invoice
+        invoice = self.env['account.move'].search([
+            ('amazon_order_id', '=', order_id),
+            ('move_type', '=', 'out_invoice'),
+            ('state', '=', 'posted')
+        ], limit=1)
+
+        if not invoice:
+            raise UserError(_("No posted Customer Invoice found for Amazon Order ID '%s'. Please create and post the Sale Order / Invoice first.") % order_id)
+
+        # 2. Fetch Settlement Records for Order ID
+        records = self.search([('order_id', '=', order_id)])
+        if not records:
+            raise UserError(_("No payment settlement records found for Order ID '%s'.") % order_id)
+
+        # Calculate positive receipts and fee deductions
+        payment_receipt_amount = 0.0
+        fee_total_amount = 0.0
+        fee_breakdown = {}
+
+        for rec in records:
+            amt = rec.amount or 0.0
+            desc = (rec.amount_description or rec.amount_type or 'Other Fee').strip()
+            if amt > 0:
+                payment_receipt_amount += amt
+            else:
+                abs_amt = abs(amt)
+                fee_total_amount += abs_amt
+                fee_breakdown[desc] = fee_breakdown.get(desc, 0.0) + abs_amt
+
+        # Round amounts
+        payment_receipt_amount = round(payment_receipt_amount, 2)
+        fee_total_amount = round(fee_total_amount, 2)
+
+        # Fallback account & partner lookups
+        clearing_account = self.env.ref('amazon_sales_dashboard.account_amazon_clearing', raise_if_not_found=False)
+        if not clearing_account:
+            clearing_account = self.env['account.account'].search([('code', '=', '123456')], limit=1)
+        if not clearing_account:
+            clearing_account = self.env['account.account'].search([('name', 'ilike', 'Amazon Settlement Clearing')], limit=1)
+        if not clearing_account:
+            clearing_account = self.env['account.account'].search([('account_type', 'in', ['asset_current', 'liability_current'])], limit=1)
+
+        amazon_partner = self.env.ref('amazon_sales_dashboard.partner_amazon_vendor', raise_if_not_found=False)
+        if not amazon_partner:
+            amazon_partner = self.env['res.partner'].search([('name', 'ilike', 'Amazon')], limit=1)
+        if not amazon_partner:
+            amazon_partner = self.env['res.partner'].create({
+                'name': 'Amazon Sellers',
+                'supplier_rank': 1,
+                'is_company': True,
+            })
+
+        fee_product = self.env.ref('amazon_sales_dashboard.product_amazon_service_fee', raise_if_not_found=False)
+        if not fee_product:
+            fee_product = self.env['product.product'].search([('name', 'ilike', 'Amazon Service Fee')], limit=1)
+
+        payment_journal = self.env['account.journal'].search([('type', 'in', ['bank', 'cash'])], limit=1)
+
+        # STEP 1: Customer Invoice Payment Registration + Write-Off
+        payment = False
+        receivable_line = invoice.line_ids.filtered(lambda l: l.account_id.account_type == 'asset_receivable')
+        if invoice.amount_residual > 0 and receivable_line:
+            pay_amount = min(payment_receipt_amount, invoice.amount_residual)
+            diff_amount = fee_total_amount
+
+            pay_wizard_vals = {
+                'amount': pay_amount,
+                'payment_date': invoice.invoice_date or fields.Date.today(),
+                'journal_id': payment_journal.id if payment_journal else False,
+                'communication': f"Amazon Payout - {order_id}",
+            }
+
+            if diff_amount > 0 and clearing_account:
+                pay_wizard_vals.update({
+                    'payment_difference_handling': 'reconcile',
+                    'writeoff_account_id': clearing_account.id,
+                    'writeoff_label': f"Amazon Fee Deductions - {order_id}",
+                })
+
+            pay_wizard = self.env['account.payment.register'].with_context(
+                active_model='account.move',
+                active_ids=invoice.ids
+            ).create(pay_wizard_vals)
+            
+            res_pay = pay_wizard.action_create_payments()
+            if res_pay and isinstance(res_pay, dict) and 'res_id' in res_pay:
+                payment = self.env['account.payment'].browse(res_pay['res_id'])
+            elif pay_wizard.payment_token_id or invoice.payment_ids:
+                payment = invoice.payment_ids[0] if invoice.payment_ids else False
+
+        # STEP 2: Create Amazon Transfer Journal Entry (Clearing Account -> Creditors)
+        move_entry = False
+        if fee_total_amount > 0 and clearing_account and amazon_partner:
+            payable_account = amazon_partner.property_account_payable_id or self.env['account.account'].search([('account_type', '=', 'liability_payable')], limit=1)
+            
+            entry_vals = {
+                'move_type': 'entry',
+                'date': fields.Date.today(),
+                'ref': f"Amazon Fee Transfer - {order_id}",
+                'amazon_order_id': order_id,
+                'line_ids': [
+                    (0, 0, {
+                        'name': f"Amazon Clearing Transfer - {order_id}",
+                        'account_id': clearing_account.id,
+                        'debit': 0.0,
+                        'credit': fee_total_amount,
+                    }),
+                    (0, 0, {
+                        'name': f"Amazon Creditors Transfer - {order_id}",
+                        'account_id': payable_account.id,
+                        'partner_id': amazon_partner.id,
+                        'debit': fee_total_amount,
+                        'credit': 0.0,
+                    }),
+                ]
+            }
+            move_entry = self.env['account.move'].create(entry_vals)
+            move_entry.action_post()
+
+        # STEP 3: Create Amazon Vendor Bill & Reconcile
+        vendor_bill = False
+        if fee_total_amount > 0 and amazon_partner and fee_breakdown:
+            bill_lines = []
+            for desc, amt in fee_breakdown.items():
+                bill_lines.append((0, 0, {
+                    'product_id': fee_product.id if fee_product else False,
+                    'name': f"[{order_id}] {desc}",
+                    'quantity': 1.0,
+                    'price_unit': round(amt, 2),
+                }))
+
+            bill_vals = {
+                'move_type': 'in_invoice',
+                'partner_id': amazon_partner.id,
+                'invoice_date': fields.Date.today(),
+                'ref': f"Amazon Fee Bill - {order_id}",
+                'amazon_order_id': order_id,
+                'invoice_line_ids': bill_lines,
+            }
+            vendor_bill = self.env['account.move'].create(bill_vals)
+            vendor_bill.action_post()
+
+            # Reconcile Vendor Bill with Transfer Journal Entry
+            if move_entry:
+                bill_payable_line = vendor_bill.line_ids.filtered(lambda l: l.account_id.account_type == 'liability_payable')
+                entry_payable_line = move_entry.line_ids.filtered(lambda l: l.account_id.account_type == 'liability_payable')
+                if bill_payable_line and entry_payable_line:
+                    (bill_payable_line + entry_payable_line).reconcile()
+
+        # Update records status
+        records.write({
+            'state': 'posted',
+            'move_id': move_entry.id if move_entry else False,
+            'payment_id': payment.id if payment else False,
+        })
+
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': _("Journal Entry Creation"),
-                'message': _("Journal Entry creation logic is ready for integration in the next update."),
-                'type': 'info',
-                'sticky': False,
+                'title': _("Automated Reconciliation Complete"),
+                'message': _("Successfully reconciled Customer Payment, created Amazon Transfer Journal Entry %s, and generated Vendor Bill %s for Order %s.") % (
+                    move_entry.name if move_entry else '',
+                    vendor_bill.name if vendor_bill else '',
+                    order_id
+                ),
+                'type': 'success',
+                'sticky': True,
             }
         }
 
+    def action_create_journal_entry(self):
+        """ Redirect to automated reconciliation process """
+        order_id = self[0].order_id if self else False
+        return self.action_process_full_settlement_reconciliation(order_id)
+
     def action_create_payment(self):
-        """ Hook for future Payment creation """
-        for rec in self:
-            if rec.payment_id:
-                raise models.UserError(_("Payment already registered for order %s.") % rec.order_id)
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': _("Payment Registration"),
-                'message': _("Payment registration logic is ready for integration in the next update."),
-                'type': 'info',
-                'sticky': False,
-            }
-        }
+        """ Redirect to automated reconciliation process """
+        order_id = self[0].order_id if self else False
+        return self.action_process_full_settlement_reconciliation(order_id)
+

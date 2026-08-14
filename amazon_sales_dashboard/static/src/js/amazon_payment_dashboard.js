@@ -22,6 +22,7 @@ export class AmazonPaymentDashboard extends Component {
             searchQuery: "",
             isLoading: false,
             isAllDashboard: false,
+            showBreakdownModal: false,
         });
 
         onWillStart(async () => {
@@ -66,7 +67,23 @@ export class AmazonPaymentDashboard extends Component {
 
     async onSelectOrder(orderId) {
         this.state.selectedOrderId = orderId;
-        await this.loadDashboardData(orderId);
+        const found = this.state.orders.find(o => o.order_id === orderId);
+        if (found) {
+            this.state.selectedOrder = found;
+        } else {
+            await this.loadDashboardData(orderId);
+        }
+    }
+
+    async onOpenBreakdownWizard(orderId) {
+        if (orderId) {
+            await this.onSelectOrder(orderId);
+        }
+        this.state.showBreakdownModal = true;
+    }
+
+    onCloseBreakdownWizard() {
+        this.state.showBreakdownModal = false;
     }
 
     onOrderSelectChange(ev) {
@@ -89,45 +106,44 @@ export class AmazonPaymentDashboard extends Component {
         });
     }
 
-    async onCreateJournalEntry() {
-        if (!this.state.selectedOrder) {
-            this.notification.add("Please select an order first.", { type: "warning" });
+    async onProcessFullSettlement(orderId) {
+        const targetOrderId = orderId || (this.state.selectedOrder ? this.state.selectedOrder.order_id : null);
+        if (!targetOrderId) {
+            this.notification.add("Please select an Amazon Order ID to process.", { type: "warning" });
             return;
         }
+
+        this.state.isLoading = true;
         try {
-            const records = await this.orm.searchRead(
+            const res = await this.orm.call(
                 "amazon.payment.record",
-                [["order_id", "=", this.state.selectedOrder.order_id]],
-                ["id"]
+                "action_process_full_settlement_reconciliation",
+                [targetOrderId]
             );
-            const ids = records.map(r => r.id);
-            if (ids.length > 0) {
-                const res = await this.orm.call("amazon.payment.record", "action_create_journal_entry", [ids]);
+            if (res && typeof res === "object" && res.type === "ir.actions.client") {
                 await this.action.doAction(res);
+            } else {
+                this.notification.add(`Successfully processed Payment, Journal Entry & Vendor Bill for Order ${targetOrderId}!`, { type: "success" });
             }
+            await this.loadDashboardData(targetOrderId);
         } catch (error) {
-            console.error("Error creating journal entry:", error);
+            console.error("Error processing full settlement reconciliation:", error);
+            const msg = error.data && error.data.message ? error.data.message : (error.message || String(error));
+            this.notification.add(msg, { type: "danger", sticky: true });
+        } finally {
+            this.state.isLoading = false;
+        }
+    }
+
+    async onCreateJournalEntry() {
+        if (this.state.selectedOrder) {
+            await this.onProcessFullSettlement(this.state.selectedOrder.order_id);
         }
     }
 
     async onCreatePayment() {
-        if (!this.state.selectedOrder) {
-            this.notification.add("Please select an order first.", { type: "warning" });
-            return;
-        }
-        try {
-            const records = await this.orm.searchRead(
-                "amazon.payment.record",
-                [["order_id", "=", this.state.selectedOrder.order_id]],
-                ["id"]
-            );
-            const ids = records.map(r => r.id);
-            if (ids.length > 0) {
-                const res = await this.orm.call("amazon.payment.record", "action_create_payment", [ids]);
-                await this.action.doAction(res);
-            }
-        } catch (error) {
-            console.error("Error creating payment:", error);
+        if (this.state.selectedOrder) {
+            await this.onProcessFullSettlement(this.state.selectedOrder.order_id);
         }
     }
 
