@@ -10,9 +10,9 @@
 
         <!-- Default Amazon Settlement Clearing Account (COA) -->
         <record id="account_amazon_clearing" model="account.account">
-            <field name="name">Amazon Settlement Clearing Account</field>
-            <field name="code">123456</field>
-            <field name="account_type">asset_current</field>
+            <field name="name">Amazone</field>
+            <field name="code">1221</field>
+            <field name="account_type">liability_current</field>
             <field name="reconcile">True</field>
         </record>
 

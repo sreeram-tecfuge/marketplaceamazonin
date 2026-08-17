@@ -3,7 +3,7 @@ import base64
 import csv
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 
@@ -95,6 +95,89 @@ class AmazonCsvImportWizard(models.TransientModel):
                 pass
         return val_str
 
+    def _read_file_rows(self, file_bytes, filename=None):
+        """
+        Parses raw bytes of an uploaded file into a list of row lists.
+        Supports Excel (.xlsx, .xls) via openpyxl / xlrd, and Text / CSV / TSV with auto-detected delimiter.
+        """
+        rows = []
+        filename_lower = (filename or '').lower()
+        is_excel = (
+            filename_lower.endswith(('.xlsx', '.xls', '.xlsm')) or
+            file_bytes.startswith(b'PK\x03\x04') or
+            file_bytes.startswith(b'\xd0\xcf\x11\xe0')
+        )
+
+        def _format_cell(cell):
+            if cell is None:
+                return ''
+            if isinstance(cell, datetime):
+                return cell.strftime('%Y-%m-%d %H:%M:%S')
+            if isinstance(cell, date):
+                return cell.strftime('%Y-%m-%d')
+            if isinstance(cell, float) and cell.is_integer():
+                return str(int(cell))
+            return str(cell).strip()
+
+        if is_excel:
+            # 1. Try openpyxl for .xlsx / .xlsm / PK files
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+                sheet = wb.active
+                for row in sheet.iter_rows(values_only=True):
+                    if any(c is not None and str(c).strip() for c in row):
+                        rows.append([_format_cell(c) for c in row])
+            except Exception as ex_openpyxl:
+                _logger.info(f"openpyxl parsing failed: {ex_openpyxl}")
+
+            # 2. Try xlrd for legacy .xls if openpyxl didn't parse any rows
+            if not rows:
+                try:
+                    import xlrd
+                    wb = xlrd.open_workbook(file_contents=file_bytes)
+                    sheet = wb.sheet_by_index(0)
+                    for row_idx in range(sheet.nrows):
+                        row = sheet.row_values(row_idx)
+                        if any(c != '' and c is not None for c in row):
+                            rows.append([_format_cell(c) for c in row])
+                except Exception as ex_xlrd:
+                    _logger.info(f"xlrd parsing failed: {ex_xlrd}")
+
+        # 3. Fallback to Text / CSV / TSV decoding if Excel was not processed or returned no rows
+        if not rows:
+            text_content = False
+            for encoding in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
+                try:
+                    # Avoid decoding zip headers via latin1
+                    if encoding in ('latin1', 'cp1252') and file_bytes.startswith(b'PK\x03\x04'):
+                        continue
+                    text_content = file_bytes.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+
+            if not text_content:
+                raise UserError(_("Could not decode file encoding. Please ensure it is a valid CSV or Excel file."))
+
+            lines = [l for l in text_content.splitlines() if l.strip()]
+            if not lines:
+                raise UserError(_("Uploaded file is empty."))
+
+            # Auto-detect delimiter (tab, comma, semicolon)
+            first_line = lines[0]
+            delimiter = '\t' if '\t' in first_line else (',' if ',' in first_line else ';')
+
+            try:
+                reader = csv.reader(lines, delimiter=delimiter)
+                for row in reader:
+                    if any(row):
+                        rows.append([str(c).strip() for c in row])
+            except Exception as ce:
+                raise UserError(_("Could not parse file as CSV/TSV: %s") % ce)
+
+        return rows
+
     def action_import(self):
         self.ensure_one()
         if not self.file_data:
@@ -105,33 +188,25 @@ class AmazonCsvImportWizard(models.TransientModel):
         except Exception as e:
             raise UserError(_("Error decoding uploaded file: %s") % e)
 
-        # Decode content
-        text_content = False
-        for encoding in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
-            try:
-                text_content = file_bytes.decode(encoding)
-                break
-            except UnicodeDecodeError:
-                continue
+        rows = self._read_file_rows(file_bytes, self.filename)
 
-        if not text_content:
-            raise UserError(_("Could not decode file encoding. Please ensure it is a valid CSV/Text file."))
+        if not rows or len(rows) < 2:
+            raise UserError(_("Uploaded file does not contain valid data rows."))
 
-        lines = text_content.splitlines()
-        if not lines:
-            raise UserError(_("Uploaded file is empty."))
-
-        try:
-            reader = csv.reader(lines)
-            header = next(reader)
-        except Exception as ce:
-            raise UserError(_("Could not parse file as CSV: %s") % ce)
+        header = rows[0]
+        data_rows = rows[1:]
 
         # Standardize header names
         header_map = {}
         for idx, col in enumerate(header):
-            clean_col = col.strip().lower().replace(' ', '_').replace('/', '_')
+            clean_col = str(col).strip().lower().replace(' ', '_').replace('/', '_').replace('-', '_').replace('.', '')
             header_map[clean_col] = idx
+
+        # Column Aliases
+        if 'order_id' not in header_map and 'amazon_order_id' in header_map:
+            header_map['order_id'] = header_map['amazon_order_id']
+        if 'transaction_type' not in header_map and 'type' in header_map:
+            header_map['transaction_type'] = header_map['type']
 
         # Header Validation: Ensure this is a valid Amazon report file
         required_headers = ['transaction_type', 'order_id']
@@ -139,7 +214,7 @@ class AmazonCsvImportWizard(models.TransientModel):
         if missing_headers:
             raise UserError(_("Invalid Amazon File Header: Missing essential column(s) '%s'. Please upload a valid Amazon Sales/Refund CSV/Excel report file.") % ", ".join(missing_headers))
 
-        _logger.info(f"Importing Amazon CSV with headers: {list(header_map.keys())}")
+        _logger.info(f"Importing Amazon report with headers: {list(header_map.keys())}")
 
         batch_id = fields.Datetime.now().strftime('BATCH-%Y%m%d-%H%M%S')
         created_records = self.env['amazon.dashboard.record']
@@ -151,17 +226,8 @@ class AmazonCsvImportWizard(models.TransientModel):
         ignored_count = 0
         log_lines = []
 
-        while True:
-            try:
-                row = next(reader, None)
-                if row is None:
-                    break
-            except Exception as re:
-                _logger.warning(f"Error reading CSV row: {re}")
-                log_lines.append(f"• [ROW READ ERROR] Skipped unparseable row: {re}")
-                continue
-
-            if not row or not any(row):
+        for row in data_rows:
+            if not row or not any(str(c).strip() for c in row if c is not None):
                 continue
 
             total_rows += 1
@@ -169,7 +235,7 @@ class AmazonCsvImportWizard(models.TransientModel):
             def get_val(key, is_id=False):
                 idx = header_map.get(key)
                 if idx is not None and idx < len(row):
-                    val = row[idx].strip()
+                    val = str(row[idx]).strip() if row[idx] is not None else ''
                     if is_id and val:
                         return self._clean_str_id(val)
                     return val
@@ -178,7 +244,7 @@ class AmazonCsvImportWizard(models.TransientModel):
             tx_type = get_val('transaction_type')
             order_id = get_val('order_id', is_id=True)
             inv_num = get_val('invoice_number', is_id=True)
-            sku = get_val('sku')
+            sku = get_val('sku', is_id=True)
             cn_no = get_val('credit_note_no', is_id=True)
 
             # Allow Shipment, Refund, Cancel, and FreeReplacement transaction types

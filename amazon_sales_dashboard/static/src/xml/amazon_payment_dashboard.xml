@@ -8,16 +8,32 @@
                 <div>
                     <h2 class="fw-bold mb-1 text-dark d-flex align-items-center gap-2">
                         <i class="fa fa-credit-card text-success"></i>
-                        <span>Amazon Payment &amp; Settlement Dashboard</span>
+                        <span>
+                            <t t-if="state.isAllDashboard">All Historical Payment Settlements</t>
+                            <t t-else="">Amazon Payment &amp; Settlement Dashboard</t>
+                        </span>
                     </h2>
                     <div class="d-flex align-items-center gap-2">
-                        <span class="text-muted fs-6">Settlement Payouts, Order Fee Breakdown &amp; Financial Reconciliation</span>
+                        <span class="text-muted fs-6">
+                            <t t-if="state.isAllDashboard">All Historical Settlement Data across all past imported files</t>
+                            <t t-else="">Settlement Payouts, Order Fee Breakdown &amp; Financial Reconciliation</t>
+                        </span>
                         <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2 py-1 small">
-                            <i class="fa fa-database me-1"></i> <t t-esc="state.kpis.latest_batch_id || 'Latest Batch'"/>
+                            <i class="fa fa-database me-1"></i> <t t-esc="state.isAllDashboard ? 'All Records' : (state.kpis.latest_batch_id || 'Latest Batch')"/>
                         </span>
                     </div>
                 </div>
                 <div class="d-flex align-items-center gap-2">
+                    <t t-if="!state.isAllDashboard">
+                        <button class="btn btn-outline-primary btn-sm rounded-pill shadow-sm" t-on-click="onToggleAllDashboard" title="Switch to view all historical payment settlement records">
+                            <i class="fa fa-database me-1"></i> View All Payment Data
+                        </button>
+                    </t>
+                    <t t-else="">
+                        <button class="btn btn-outline-success btn-sm rounded-pill shadow-sm" t-on-click="onToggleAllDashboard" title="Switch to view latest batch upload only">
+                            <i class="fa fa-filter me-1"></i> View Latest Batch Only
+                        </button>
+                    </t>
                     <button class="btn btn-outline-secondary btn-sm rounded-pill shadow-sm" t-on-click="onRefresh">
                         <i class="fa fa-refresh me-1"></i> Refresh
                     </button>
@@ -90,6 +106,7 @@
                                     <tr>
                                         <th class="ps-4 py-3" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa !important; border-bottom: 2px solid #dee2e6;">Order ID</th>
                                         <th class="py-3" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa !important; border-bottom: 2px solid #dee2e6;">Posted Date</th>
+                                        <th class="py-3" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa !important; border-bottom: 2px solid #dee2e6;">Reconciliation Status</th>
                                         <th class="py-3" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa !important; border-bottom: 2px solid #dee2e6;">Principal Sales</th>
                                         <th class="py-3" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa !important; border-bottom: 2px solid #dee2e6;">Amazon Fees</th>
                                         <th class="py-3" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa !important; border-bottom: 2px solid #dee2e6;">Tax Amount</th>
@@ -100,7 +117,7 @@
                                 <tbody>
                                     <t t-if="state.filteredOrders.length === 0">
                                         <tr>
-                                            <td colspan="7" class="text-center py-5 text-muted">
+                                            <td colspan="8" class="text-center py-5 text-muted">
                                                 <i class="fa fa-folder-open-o fs-2 mb-2 d-block text-secondary"></i>
                                                 No payment order records match your search query.
                                             </td>
@@ -110,14 +127,45 @@
                                         <tr t-att-class="state.selectedOrderId === ord.order_id ? 'table-success-subtle border-start border-success border-4' : ''" class="cursor-pointer">
                                             <td class="ps-4 fw-bold text-dark font-monospace"><t t-esc="ord.order_id"/></td>
                                             <td class="small text-muted"><t t-esc="ord.posted_date"/></td>
+                                            <td>
+                                                <t t-if="ord.is_processed">
+                                                    <span class="badge bg-success text-white rounded-pill px-3 py-1.5 fw-bold d-inline-flex align-items-center gap-1 shadow-sm" title="Settlement Reconciliation Complete">
+                                                        <i class="fa fa-check-circle"></i> Reconciled
+                                                    </span>
+                                                </t>
+                                                <t t-else="">
+                                                    <span class="badge bg-secondary-subtle text-secondary border rounded-pill px-3 py-1.5 fw-semibold d-inline-flex align-items-center gap-1" title="Pending Settlement Reconciliation">
+                                                        <i class="fa fa-clock-o"></i> Pending
+                                                    </span>
+                                                </t>
+                                            </td>
                                             <td class="small font-monospace text-primary fw-semibold"><t t-esc="state.kpis.currency_symbol || '₹'"/> <t t-esc="ord.principal"/></td>
                                             <td class="small font-monospace text-danger"><t t-esc="state.kpis.currency_symbol || '₹'"/> <t t-esc="ord.fees"/></td>
                                             <td class="small font-monospace text-muted"><t t-esc="state.kpis.currency_symbol || '₹'"/> <t t-esc="ord.tax"/></td>
                                             <td class="fw-bold font-monospace text-success"><t t-esc="state.kpis.currency_symbol || '₹'"/> <t t-esc="ord.total_amount"/></td>
                                             <td class="text-end pe-4">
-                                                <button class="btn btn-sm btn-success rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1 shadow-sm" t-on-click.stop="() => this.onProcessFullSettlement(ord.order_id)" title="Automate Customer Payment, Journal Entry &amp; Vendor Bill">
-                                                    <i class="fa fa-cogs"></i> Process Settlement
-                                                </button>
+                                                <t t-if="!ord.is_processed">
+                                                    <button class="btn btn-sm btn-success rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1 shadow-sm" t-on-click.stop="() => this.onProcessFullSettlement(ord.order_id)" title="Automate Customer Payment, Journal Entry &amp; Vendor Bill">
+                                                        <i class="fa fa-cogs"></i> Process Settlement
+                                                    </button>
+                                                </t>
+                                                <t t-else="">
+                                                    <t t-if="ord.payment_id">
+                                                        <button class="btn btn-sm btn-outline-success rounded-pill px-2.5 py-1 fw-semibold d-inline-flex align-items-center gap-1 shadow-sm ms-1" t-on-click.stop="() => this.onOpenPayment(ord.payment_id)" title="View Created Customer Payment">
+                                                            <i class="fa fa-credit-card"></i> Payment
+                                                        </button>
+                                                    </t>
+                                                    <t t-if="ord.move_id">
+                                                        <button class="btn btn-sm btn-outline-info rounded-pill px-2.5 py-1 fw-semibold d-inline-flex align-items-center gap-1 shadow-sm ms-1" t-on-click.stop="() => this.onOpenJournalEntry(ord.move_id)" title="View Created Transfer Journal Entry">
+                                                            <i class="fa fa-book"></i> Journal Entry
+                                                        </button>
+                                                    </t>
+                                                    <t t-if="ord.vendor_bill_id">
+                                                        <button class="btn btn-sm btn-outline-warning text-dark rounded-pill px-2.5 py-1 fw-semibold d-inline-flex align-items-center gap-1 shadow-sm ms-1" t-on-click.stop="() => this.onOpenVendorBill(ord.vendor_bill_id)" title="View Created Amazon Fee Vendor Bill">
+                                                            <i class="fa fa-file-text-o"></i> Vendor Bill
+                                                        </button>
+                                                    </t>
+                                                </t>
                                                 <button class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1 shadow-sm ms-1" t-on-click.stop="() => this.onOpenBreakdownWizard(ord.order_id)" title="View Order Settlement Breakdown in Wizard">
                                                     <i class="fa fa-table"></i> Breakdown
                                                 </button>
@@ -223,10 +271,32 @@
 
                             <!-- Modal Footer with Action Buttons -->
                             <div class="modal-footer bg-white border-top py-3 px-4 d-flex justify-content-between align-items-center">
-                                <div class="d-flex align-items-center gap-2">
-                                    <button class="btn btn-success rounded-pill px-4 py-2 fw-semibold shadow-sm" t-on-click="() => this.onProcessFullSettlement(state.selectedOrder ? state.selectedOrder.order_id : null)" title="Automate Customer Payment, Journal Entry &amp; Vendor Bill">
-                                        <i class="fa fa-cogs me-1"></i> Automate Payment, Journal &amp; Vendor Bill
-                                    </button>
+                                <div class="d-flex align-items-center gap-2 flex-wrap">
+                                    <t t-if="state.selectedOrder &amp;&amp; !state.selectedOrder.is_processed">
+                                        <button class="btn btn-success rounded-pill px-4 py-2 fw-semibold shadow-sm" t-on-click="() => this.onProcessFullSettlement(state.selectedOrder ? state.selectedOrder.order_id : null)" title="Automate Customer Payment, Journal Entry &amp; Vendor Bill">
+                                            <i class="fa fa-cogs me-1"></i> Automate Payment, Journal &amp; Vendor Bill
+                                        </button>
+                                    </t>
+                                    <t t-if="state.selectedOrder &amp;&amp; state.selectedOrder.is_processed">
+                                        <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-3 py-2 fw-bold">
+                                            <i class="fa fa-check-circle me-1"></i> Reconciled
+                                        </span>
+                                        <t t-if="state.selectedOrder.payment_id">
+                                            <button class="btn btn-outline-success rounded-pill px-3 py-1.5 fw-semibold shadow-sm ms-1" t-on-click="() => this.onOpenPayment(state.selectedOrder.payment_id)">
+                                                <i class="fa fa-credit-card me-1"></i> View Payment
+                                            </button>
+                                        </t>
+                                        <t t-if="state.selectedOrder.move_id">
+                                            <button class="btn btn-outline-info rounded-pill px-3 py-1.5 fw-semibold shadow-sm ms-1" t-on-click="() => this.onOpenJournalEntry(state.selectedOrder.move_id)">
+                                                <i class="fa fa-book me-1"></i> View Journal Entry
+                                            </button>
+                                        </t>
+                                        <t t-if="state.selectedOrder.vendor_bill_id">
+                                            <button class="btn btn-outline-warning text-dark rounded-pill px-3 py-1.5 fw-semibold shadow-sm ms-1" t-on-click="() => this.onOpenVendorBill(state.selectedOrder.vendor_bill_id)">
+                                                <i class="fa fa-file-text-o me-1"></i> View Vendor Bill
+                                            </button>
+                                        </t>
+                                    </t>
                                 </div>
                                 <button type="button" class="btn btn-secondary rounded-pill px-4 py-2" t-on-click="onCloseBreakdownWizard">
                                     Close

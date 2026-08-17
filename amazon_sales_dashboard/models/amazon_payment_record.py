@@ -56,6 +56,7 @@ class AmazonPaymentRecord(models.Model):
     
     move_id = fields.Many2one('account.move', string="Created Journal Entry", readonly=True)
     payment_id = fields.Many2one('account.payment', string="Created Payment", readonly=True)
+    vendor_bill_id = fields.Many2one('account.move', string="Created Vendor Bill", readonly=True)
 
     @api.depends('order_id', 'settlement_id', 'amount_description', 'amount')
     def _compute_name(self):
@@ -112,11 +113,30 @@ class AmazonPaymentRecord(models.Model):
                         'tax': 0.0,
                         'records_count': 0,
                         'descriptions': {},
+                        'payment_id': rec.payment_id.id if rec.payment_id else False,
+                        'payment_name': rec.payment_id.name if rec.payment_id else '',
+                        'move_id': rec.move_id.id if rec.move_id else False,
+                        'move_name': rec.move_id.name if rec.move_id else '',
+                        'vendor_bill_id': rec.vendor_bill_id.id if rec.vendor_bill_id else False,
+                        'vendor_bill_name': rec.vendor_bill_id.name if rec.vendor_bill_id else '',
+                        'is_processed': rec.state == 'posted',
                     }
                 
                 ord_info = order_dict[rec.order_id]
                 ord_info['total_amount'] += amt
                 ord_info['records_count'] += 1
+
+                if rec.payment_id and not ord_info.get('payment_id'):
+                    ord_info['payment_id'] = rec.payment_id.id
+                    ord_info['payment_name'] = rec.payment_id.name or f"Payment #{rec.payment_id.id}"
+                if rec.move_id and not ord_info.get('move_id'):
+                    ord_info['move_id'] = rec.move_id.id
+                    ord_info['move_name'] = rec.move_id.name or f"Entry #{rec.move_id.id}"
+                if rec.vendor_bill_id and not ord_info.get('vendor_bill_id'):
+                    ord_info['vendor_bill_id'] = rec.vendor_bill_id.id
+                    ord_info['vendor_bill_name'] = rec.vendor_bill_id.name or f"Bill #{rec.vendor_bill_id.id}"
+                if rec.state == 'posted':
+                    ord_info['is_processed'] = True
                 
                 # Breakdown by description
                 if desc not in ord_info['descriptions']:
@@ -139,6 +159,52 @@ class AmazonPaymentRecord(models.Model):
                 if rec.order_id and rec.order_id in order_dict:
                     order_dict[rec.order_id]['fees'] += amt
 
+        # Bulk fallback lookup for created accounting documents
+        order_ids_list = list(distinct_orders)
+        if order_ids_list:
+            entries = self.env['account.move'].search([
+                ('amazon_order_id', 'in', order_ids_list),
+                ('move_type', '=', 'entry')
+            ])
+            entries_by_order = {e.amazon_order_id: e for e in entries}
+
+            bills = self.env['account.move'].search([
+                ('amazon_order_id', 'in', order_ids_list),
+                ('move_type', '=', 'in_invoice')
+            ])
+            bills_by_order = {b.amazon_order_id: b for b in bills}
+
+            invoices = self.env['account.move'].search([
+                ('amazon_order_id', 'in', order_ids_list),
+                ('move_type', '=', 'out_invoice')
+            ])
+            invoices_by_order = {i.amazon_order_id: i for i in invoices}
+
+            for oid, odata in order_dict.items():
+                if not odata.get('move_id') and oid in entries_by_order:
+                    ent = entries_by_order[oid]
+                    odata['move_id'] = ent.id
+                    odata['move_name'] = ent.name or f"Entry #{ent.id}"
+
+                if not odata.get('vendor_bill_id') and oid in bills_by_order:
+                    bll = bills_by_order[oid]
+                    odata['vendor_bill_id'] = bll.id
+                    odata['vendor_bill_name'] = bll.name or f"Bill #{bll.id}"
+
+                if not odata.get('payment_id'):
+                    if oid in invoices_by_order and invoices_by_order[oid].payment_ids:
+                        pmt = invoices_by_order[oid].payment_ids[0]
+                        odata['payment_id'] = pmt.id
+                        odata['payment_name'] = pmt.name or f"Payment #{pmt.id}"
+                    else:
+                        pmt = self.env['account.payment'].search(['|', ('memo', 'ilike', oid), ('payment_reference', 'ilike', oid)], limit=1)
+                        if pmt:
+                            odata['payment_id'] = pmt.id
+                            odata['payment_name'] = pmt.name or f"Payment #{pmt.id}"
+
+                if odata.get('payment_id') or odata.get('move_id') or odata.get('vendor_bill_id'):
+                    odata['is_processed'] = True
+
         # Format orders list
         orders_list = []
         for oid, odata in order_dict.items():
@@ -154,6 +220,13 @@ class AmazonPaymentRecord(models.Model):
                 'fees': round(odata['fees'], 2),
                 'tax': round(odata['tax'], 2),
                 'records_count': odata['records_count'],
+                'is_processed': odata.get('is_processed', False),
+                'payment_id': odata.get('payment_id', False),
+                'payment_name': odata.get('payment_name', ''),
+                'move_id': odata.get('move_id', False),
+                'move_name': odata.get('move_name', ''),
+                'vendor_bill_id': odata.get('vendor_bill_id', False),
+                'vendor_bill_name': odata.get('vendor_bill_name', ''),
                 'breakdown': descs_list,
             })
 
@@ -177,6 +250,13 @@ class AmazonPaymentRecord(models.Model):
                 'fees': round(selected_order_data['fees'], 2),
                 'tax': round(selected_order_data['tax'], 2),
                 'records_count': selected_order_data['records_count'],
+                'is_processed': selected_order_data.get('is_processed', False),
+                'payment_id': selected_order_data.get('payment_id', False),
+                'payment_name': selected_order_data.get('payment_name', ''),
+                'move_id': selected_order_data.get('move_id', False),
+                'move_name': selected_order_data.get('move_name', ''),
+                'vendor_bill_id': selected_order_data.get('vendor_bill_id', False),
+                'vendor_bill_name': selected_order_data.get('vendor_bill_name', ''),
                 'breakdown': descs_list,
             }
 
@@ -236,8 +316,8 @@ class AmazonPaymentRecord(models.Model):
         if not records:
             raise UserError(_("No payment settlement records found for Order ID '%s'.") % order_id)
 
-        # Calculate positive receipts and fee deductions
-        payment_receipt_amount = 0.0
+        # Calculate Gross Sales (Item price + TDS + TCS) and Amazon Fee Deductions
+        gross_sales_amount = 0.0
         fee_total_amount = 0.0
         fee_breakdown = {}
 
@@ -245,25 +325,28 @@ class AmazonPaymentRecord(models.Model):
             amt = rec.amount or 0.0
             desc = (rec.amount_description or rec.amount_type or 'Other Fee').strip()
             if amt > 0:
-                payment_receipt_amount += amt
+                gross_sales_amount += amt
             else:
                 abs_amt = abs(amt)
                 fee_total_amount += abs_amt
                 fee_breakdown[desc] = fee_breakdown.get(desc, 0.0) + abs_amt
 
         # Round amounts
-        payment_receipt_amount = round(payment_receipt_amount, 2)
+        gross_sales_amount = round(gross_sales_amount, 2)
         fee_total_amount = round(fee_total_amount, 2)
+        net_settlement_payout = round(gross_sales_amount - fee_total_amount, 2)
 
         # Fallback account & partner lookups
         clearing_account = self.env.ref('amazon_sales_dashboard.account_amazon_clearing', raise_if_not_found=False)
         if not clearing_account:
-            clearing_account = self.env['account.account'].search([('code', '=', '123456')], limit=1)
+            clearing_account = self.env['account.account'].search([('code', '=', '1221')], limit=1)
+        if not clearing_account:
+            clearing_account = self.env['account.account'].search([('name', 'ilike', 'Amazone')], limit=1)
         if not clearing_account:
             clearing_account = self.env['account.account'].search([('name', 'ilike', 'Amazon Settlement Clearing')], limit=1)
         if not clearing_account:
             clearing_account = self.env['account.account'].search([('account_type', 'in', ['asset_current', 'liability_current'])], limit=1)
-
+    
         amazon_partner = self.env.ref('amazon_sales_dashboard.partner_amazon_vendor', raise_if_not_found=False)
         if not amazon_partner:
             amazon_partner = self.env['res.partner'].search([('name', 'ilike', 'Amazon')], limit=1)
@@ -281,11 +364,19 @@ class AmazonPaymentRecord(models.Model):
         payment_journal = self.env['account.journal'].search([('type', 'in', ['bank', 'cash'])], limit=1)
 
         # STEP 1: Customer Invoice Payment Registration + Write-Off
+        # Paid Amount = (Item price + TDS + TCS) - (Item Fees + other transactions)
+        # Write-Off Amount (Clearing Account) = Item Fees + other transactions (Vendor Bill Amount)
         payment = False
         receivable_line = invoice.line_ids.filtered(lambda l: l.account_id.account_type == 'asset_receivable')
         if invoice.amount_residual > 0 and receivable_line:
-            pay_amount = min(payment_receipt_amount, invoice.amount_residual)
-            diff_amount = fee_total_amount
+            if fee_total_amount > 0 and clearing_account:
+                pay_amount = max(0.0, round(invoice.amount_residual - fee_total_amount, 2))
+                if net_settlement_payout > 0:
+                    pay_amount = net_settlement_payout
+                diff_amount = fee_total_amount
+            else:
+                pay_amount = min(net_settlement_payout if net_settlement_payout > 0 else gross_sales_amount, invoice.amount_residual)
+                diff_amount = 0.0
 
             pay_wizard_vals = {
                 'amount': pay_amount,
@@ -376,6 +467,7 @@ class AmazonPaymentRecord(models.Model):
             'state': 'posted',
             'move_id': move_entry.id if move_entry else False,
             'payment_id': payment.id if payment else False,
+            'vendor_bill_id': vendor_bill.id if vendor_bill else False,
         })
 
         return {

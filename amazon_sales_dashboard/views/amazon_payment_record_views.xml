@@ -82,6 +82,7 @@
                             <group>
                                 <field name="move_id" readonly="1"/>
                                 <field name="payment_id" readonly="1"/>
+                                <field name="vendor_bill_id" readonly="1"/>
                             </group>
                         </page>
                     </notebook>
@@ -146,9 +147,15 @@
         </field>
     </record>
 
-    <!-- Client Action for OWL Payment Dashboard -->
+    <!-- Client Action for OWL Payment Dashboard: Latest Upload -->
     <record id="action_amazon_payment_dashboard_client" model="ir.actions.client">
-        <field name="name">Amazon Payment Settlement Dashboard</field>
+        <field name="name">Latest Payment Dashboard</field>
         <field name="tag">amazon_payment_dashboard_action</field>
+    </record>
+
+    <!-- Client Action for OWL Payment Dashboard: All Historical Data -->
+    <record id="action_amazon_payment_dashboard_all_client" model="ir.actions.client">
+        <field name="name">All Payment Settlements Dashboard</field>
+        <field name="tag">amazon_payment_dashboard_all_action</field>
     </record>
 </odoo>

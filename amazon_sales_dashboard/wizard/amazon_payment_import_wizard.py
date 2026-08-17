@@ -3,7 +3,7 @@ import base64
 import csv
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 
@@ -85,36 +85,62 @@ class AmazonPaymentImportWizard(models.TransientModel):
                 pass
         return val_str
 
-    def action_import(self):
-        self.ensure_one()
-        if not self.file_data:
-            raise UserError(_("Please select a Payment Excel or CSV file to upload."))
-
-        try:
-            file_bytes = base64.b64decode(self.file_data)
-        except Exception as e:
-            raise UserError(_("Error decoding uploaded file: %s") % e)
-
+    def _read_file_rows(self, file_bytes, filename=None):
+        """
+        Parses raw bytes of an uploaded file into a list of row lists.
+        Supports Excel (.xlsx, .xls) via openpyxl / xlrd, and Text / CSV / TSV with auto-detected delimiter.
+        """
         rows = []
+        filename_lower = (filename or '').lower()
+        is_excel = (
+            filename_lower.endswith(('.xlsx', '.xls', '.xlsm')) or
+            file_bytes.startswith(b'PK\x03\x04') or
+            file_bytes.startswith(b'\xd0\xcf\x11\xe0')
+        )
 
-        # Try Excel reading first if .xlsx or .xls
-        filename_lower = (self.filename or '').lower()
-        if filename_lower.endswith(('.xlsx', '.xls')):
+        def _format_cell(cell):
+            if cell is None:
+                return ''
+            if isinstance(cell, datetime):
+                return cell.strftime('%Y-%m-%d %H:%M:%S')
+            if isinstance(cell, date):
+                return cell.strftime('%Y-%m-%d')
+            if isinstance(cell, float) and cell.is_integer():
+                return str(int(cell))
+            return str(cell).strip()
+
+        if is_excel:
+            # 1. Try openpyxl for .xlsx / .xlsm / PK files
             try:
                 import openpyxl
                 wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
                 sheet = wb.active
                 for row in sheet.iter_rows(values_only=True):
-                    if any(row):
-                        rows.append([str(c) if c is not None else '' for c in row])
-            except Exception as ex_excel:
-                _logger.info(f"openpyxl fallback to text parsing for Excel file: {ex_excel}")
+                    if any(c is not None and str(c).strip() for c in row):
+                        rows.append([_format_cell(c) for c in row])
+            except Exception as ex_openpyxl:
+                _logger.info(f"openpyxl parsing failed: {ex_openpyxl}")
 
+            # 2. Try xlrd for legacy .xls if openpyxl didn't parse any rows
+            if not rows:
+                try:
+                    import xlrd
+                    wb = xlrd.open_workbook(file_contents=file_bytes)
+                    sheet = wb.sheet_by_index(0)
+                    for row_idx in range(sheet.nrows):
+                        row = sheet.row_values(row_idx)
+                        if any(c != '' and c is not None for c in row):
+                            rows.append([_format_cell(c) for c in row])
+                except Exception as ex_xlrd:
+                    _logger.info(f"xlrd parsing failed: {ex_xlrd}")
+
+        # 3. Fallback to Text / CSV / TSV decoding if Excel was not processed or returned no rows
         if not rows:
-            # Fallback to Text/CSV/TSV decoding
             text_content = False
             for encoding in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
                 try:
+                    if encoding in ('latin1', 'cp1252') and file_bytes.startswith(b'PK\x03\x04'):
+                        continue
                     text_content = file_bytes.decode(encoding)
                     break
                 except UnicodeDecodeError:
@@ -127,7 +153,6 @@ class AmazonPaymentImportWizard(models.TransientModel):
             if not lines:
                 raise UserError(_("Uploaded file is empty."))
 
-            # Auto detect delimiter (tab, comma, semicolon)
             first_line = lines[0]
             delimiter = '\t' if '\t' in first_line else (',' if ',' in first_line else ';')
 
@@ -135,9 +160,23 @@ class AmazonPaymentImportWizard(models.TransientModel):
                 reader = csv.reader(lines, delimiter=delimiter)
                 for row in reader:
                     if any(row):
-                        rows.append(row)
+                        rows.append([str(c).strip() for c in row])
             except Exception as ce:
                 raise UserError(_("Could not parse file rows: %s") % ce)
+
+        return rows
+
+    def action_import(self):
+        self.ensure_one()
+        if not self.file_data:
+            raise UserError(_("Please select a Payment Excel or CSV file to upload."))
+
+        try:
+            file_bytes = base64.b64decode(self.file_data)
+        except Exception as e:
+            raise UserError(_("Error decoding uploaded file: %s") % e)
+
+        rows = self._read_file_rows(file_bytes, self.filename)
 
         if not rows or len(rows) < 2:
             raise UserError(_("Uploaded file does not contain valid data rows."))

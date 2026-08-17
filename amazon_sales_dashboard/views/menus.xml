@@ -59,10 +59,16 @@
               sequence="20"/>
 
     <menuitem id="menu_amazon_payment_dashboard_main"
-              name="Payment Settlement Dashboard"
+              name="Latest Payment Dashboard"
               parent="menu_amazon_payment_section"
               action="action_amazon_payment_dashboard_client"
               sequence="1"/>
+
+    <menuitem id="menu_amazon_payment_dashboard_all"
+              name="All Payment Dashboard"
+              parent="menu_amazon_payment_section"
+              action="action_amazon_payment_dashboard_all_client"
+              sequence="2"/>
 
     <menuitem id="menu_amazon_payment_record_list"
               name="Payment Settlement Data List"

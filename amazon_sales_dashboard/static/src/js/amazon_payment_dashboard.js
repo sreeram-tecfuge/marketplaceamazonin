@@ -147,6 +147,42 @@ export class AmazonPaymentDashboard extends Component {
         }
     }
 
+    async onOpenPayment(paymentId) {
+        if (!paymentId) return;
+        await this.action.doAction({
+            name: "Created Customer Payment",
+            type: "ir.actions.act_window",
+            res_model: "account.payment",
+            res_id: paymentId,
+            views: [[false, "form"]],
+            target: "current",
+        });
+    }
+
+    async onOpenJournalEntry(moveId) {
+        if (!moveId) return;
+        await this.action.doAction({
+            name: "Created Transfer Journal Entry",
+            type: "ir.actions.act_window",
+            res_model: "account.move",
+            res_id: moveId,
+            views: [[false, "form"]],
+            target: "current",
+        });
+    }
+
+    async onOpenVendorBill(billId) {
+        if (!billId) return;
+        await this.action.doAction({
+            name: "Created Amazon Vendor Bill",
+            type: "ir.actions.act_window",
+            res_model: "account.move",
+            res_id: billId,
+            views: [[false, "form"]],
+            target: "current",
+        });
+    }
+
     async onInspectOrder(orderId) {
         await this.action.doAction({
             name: `Payment Records for Order ${orderId}`,
@@ -158,9 +194,22 @@ export class AmazonPaymentDashboard extends Component {
         });
     }
 
+    async onToggleAllDashboard() {
+        this.state.isAllDashboard = !this.state.isAllDashboard;
+        await this.loadDashboardData();
+    }
+
     async onRefresh() {
         await this.loadDashboardData();
     }
 }
 
+export class AmazonAllPaymentDashboard extends AmazonPaymentDashboard {
+    setup() {
+        super.setup();
+        this.state.isAllDashboard = true;
+    }
+}
+
 registry.category("actions").add("amazon_payment_dashboard_action", AmazonPaymentDashboard);
+registry.category("actions").add("amazon_payment_dashboard_all_action", AmazonAllPaymentDashboard);
