@@ -143,21 +143,26 @@ class AmazonPaymentRecord(models.Model):
                     ord_info['descriptions'][desc] = 0.0
                 ord_info['descriptions'][desc] += amt
 
-            # Categorize KPI amounts
-            if desc_lower == 'principal':
+            # Categorize KPI & order amounts (excluding TCS & TDS from Sales & Fees)
+            if any(k in desc_lower for k in ['tcs', 'tds']):
+                total_withheld_taxes += amt
+            elif desc_lower == 'principal':
                 total_principal += amt
                 if rec.order_id and rec.order_id in order_dict:
                     order_dict[rec.order_id]['principal'] += amt
-            elif 'tax' in desc_lower and not any(k in desc_lower for k in ['tcs', 'tds']):
+            elif 'tax' in desc_lower:
                 total_product_tax += amt
                 if rec.order_id and rec.order_id in order_dict:
                     order_dict[rec.order_id]['tax'] += amt
-            elif any(k in desc_lower for k in ['tcs', 'tds']):
-                total_withheld_taxes += amt
-            elif any(k in desc_lower for k in ['commission', 'fee', 'charges', 'postage', 'easyship', 'shipping', 'fba', 'technology']):
-                total_amazon_fees += amt
+            elif amt < 0:
+                abs_amt = abs(amt)
+                total_amazon_fees += abs_amt
                 if rec.order_id and rec.order_id in order_dict:
-                    order_dict[rec.order_id]['fees'] += amt
+                    order_dict[rec.order_id]['fees'] += abs_amt
+            elif amt > 0:
+                total_principal += amt
+                if rec.order_id and rec.order_id in order_dict:
+                    order_dict[rec.order_id]['principal'] += amt
 
         # Bulk fallback lookup for created accounting documents
         order_ids_list = list(distinct_orders)
@@ -212,13 +217,18 @@ class AmazonPaymentRecord(models.Model):
             # Sort descriptions like Excel image (Principal first, fees, taxes, grand total)
             descs_list.sort(key=lambda x: (0 if x['description'].lower() == 'principal' else (1 if 'tax' in x['description'].lower() else 2), x['description']))
             
+            p_amt = round(odata['principal'], 2)
+            t_amt = round(odata['tax'], 2)
+            f_amt = round(odata['fees'], 2)
+            net_payout = round((p_amt + t_amt) - f_amt, 2)
+
             orders_list.append({
                 'order_id': odata['order_id'],
                 'posted_date': odata['posted_date'],
-                'total_amount': round(odata['total_amount'], 2),
-                'principal': round(odata['principal'], 2),
-                'fees': round(odata['fees'], 2),
-                'tax': round(odata['tax'], 2),
+                'total_amount': net_payout,
+                'principal': p_amt,
+                'fees': f_amt,
+                'tax': t_amt,
                 'records_count': odata['records_count'],
                 'is_processed': odata.get('is_processed', False),
                 'payment_id': odata.get('payment_id', False),
@@ -242,13 +252,19 @@ class AmazonPaymentRecord(models.Model):
         if selected_order_data:
             descs_list = [{'description': d, 'amount': round(a, 2)} for d, a in selected_order_data['descriptions'].items()]
             descs_list.sort(key=lambda x: (0 if x['description'].lower() == 'principal' else (1 if 'tax' in x['description'].lower() else 2), x['description']))
+
+            p_amt = round(selected_order_data['principal'], 2)
+            t_amt = round(selected_order_data['tax'], 2)
+            f_amt = round(selected_order_data['fees'], 2)
+            net_payout = round((p_amt + t_amt) - f_amt, 2)
+
             selected_order_data = {
                 'order_id': selected_order_data['order_id'],
                 'posted_date': selected_order_data['posted_date'],
-                'total_amount': round(selected_order_data['total_amount'], 2),
-                'principal': round(selected_order_data['principal'], 2),
-                'fees': round(selected_order_data['fees'], 2),
-                'tax': round(selected_order_data['tax'], 2),
+                'total_amount': net_payout,
+                'principal': p_amt,
+                'fees': f_amt,
+                'tax': t_amt,
                 'records_count': selected_order_data['records_count'],
                 'is_processed': selected_order_data.get('is_processed', False),
                 'payment_id': selected_order_data.get('payment_id', False),
@@ -269,9 +285,11 @@ class AmazonPaymentRecord(models.Model):
         ]
         field_totals.sort(key=lambda x: (0 if x['description'].lower() == 'principal' else 1, x['description']))
 
+        total_payout_kpi = round((total_principal + total_product_tax) - total_amazon_fees, 2)
+
         return {
             'kpis': {
-                'total_payout': round(total_payout, 2),
+                'total_payout': total_payout_kpi,
                 'total_principal': round(total_principal, 2),
                 'total_product_tax': round(total_product_tax, 2),
                 'total_amazon_fees': round(total_amazon_fees, 2),
