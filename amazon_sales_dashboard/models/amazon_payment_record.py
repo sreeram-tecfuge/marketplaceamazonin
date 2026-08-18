@@ -316,7 +316,7 @@ class AmazonPaymentRecord(models.Model):
         if not records:
             raise UserError(_("No payment settlement records found for Order ID '%s'.") % order_id)
 
-        # Calculate Gross Sales (Item price + TDS + TCS) and Amazon Fee Deductions
+        # Calculate Gross Sales (Item Price: Principal + Tax, excluding TDS/TCS) and Amazon Fee Deductions
         gross_sales_amount = 0.0
         fee_total_amount = 0.0
         fee_breakdown = {}
@@ -324,6 +324,12 @@ class AmazonPaymentRecord(models.Model):
         for rec in records:
             amt = rec.amount or 0.0
             desc = (rec.amount_description or rec.amount_type or 'Other Fee').strip()
+            desc_lower = desc.lower()
+
+            # Exclude TDS / TCS from Gross Sales Receipts & Fee calculations (Item Price already includes item TDS/TCS)
+            if any(k in desc_lower for k in ['tcs', 'tds']):
+                continue
+
             if amt > 0:
                 gross_sales_amount += amt
             else:
@@ -364,8 +370,8 @@ class AmazonPaymentRecord(models.Model):
         payment_journal = self.env['account.journal'].search([('type', 'in', ['bank', 'cash'])], limit=1)
 
         # STEP 1: Customer Invoice Payment Registration + Write-Off
-        # Paid Amount = (Item price + TDS + TCS) - (Item Fees + other transactions)
-        # Write-Off Amount (Clearing Account) = Item Fees + other transactions (Vendor Bill Amount)
+        # Paid Amount = Item Price (Principal + Tax) - Amazon Fees (excluding TDS/TCS)
+        # Write-Off Amount (Clearing Account) = Amazon Fees (Vendor Bill Amount)
         payment = False
         receivable_line = invoice.line_ids.filtered(lambda l: l.account_id.account_type == 'asset_receivable')
         if invoice.amount_residual > 0 and receivable_line:
