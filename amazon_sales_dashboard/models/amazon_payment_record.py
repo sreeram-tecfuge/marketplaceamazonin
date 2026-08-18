@@ -252,7 +252,7 @@ class AmazonPaymentRecord(models.Model):
         if selected_order_data:
             descs_list = [{'description': d, 'amount': round(a, 2)} for d, a in selected_order_data['descriptions'].items()]
             descs_list.sort(key=lambda x: (0 if x['description'].lower() == 'principal' else (1 if 'tax' in x['description'].lower() else 2), x['description']))
-
+            
             p_amt = round(selected_order_data['principal'], 2)
             t_amt = round(selected_order_data['tax'], 2)
             f_amt = round(selected_order_data['fees'], 2)
@@ -461,9 +461,27 @@ class AmazonPaymentRecord(models.Model):
         if fee_total_amount > 0 and amazon_partner and fee_breakdown:
             bill_lines = []
             for desc, amt in fee_breakdown.items():
+                fee_name_clean = desc.strip()
+
+                # 1. Search for existing product with matching name and is_amazon_settlement_fee = True
+                fee_prod = self.env['product.product'].search([
+                    ('name', '=', fee_name_clean),
+                    ('is_amazon_settlement_fee', '=', True)
+                ], limit=1)
+
+                # 2. If not found, create new service product (is_purchase = True)
+                if not fee_prod:
+                    fee_prod = self.env['product.product'].create({
+                        'name': fee_name_clean,
+                        'type': 'service',
+                        'purchase_ok': True,
+                        'is_amazon_settlement_fee': True,
+                        'default_code': f"AMZ-{fee_name_clean.upper().replace(' ', '-')[:20]}",
+                    })
+
                 bill_lines.append((0, 0, {
-                    'product_id': fee_product.id if fee_product else False,
-                    'name': f"[{order_id}] {desc}",
+                    'product_id': fee_prod.id,
+                    'name': f"[{order_id}] {fee_name_clean}",
                     'quantity': 1.0,
                     'price_unit': round(amt, 2),
                 }))

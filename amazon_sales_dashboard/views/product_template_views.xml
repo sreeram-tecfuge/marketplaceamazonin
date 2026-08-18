@@ -8,6 +8,10 @@
             <xpath expr="//field[@name='categ_id']" position="after">
                 <field name="asin"/>
                 <field name="product_tax_code"/>
+                <field name="is_amazon_settlement_fee"/>
+            </xpath>
+            <xpath expr="//field[@name='name']" position="attributes">
+                <attribute name="readonly">is_amazon_settlement_fee</attribute>
             </xpath>
         </field>
     </record>
