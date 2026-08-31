@@ -282,7 +282,14 @@ class AmazonDashboardRecord(models.Model):
                 taxes = rec._find_matching_taxes(company, rec.cgst_rate, rec.sgst_rate, rec.igst_rate, rec.utgst_rate, is_intra=is_intra)
 
                 qty = rec.quantity if rec.quantity > 0 else 1.0
-                unit_price = abs(rec.tax_exclusive_gross / qty) if rec.tax_exclusive_gross else 0.0
+                if rec.tax_exclusive_gross:
+                    unit_price = abs(rec.tax_exclusive_gross / qty)
+                elif rec.principal_amount:
+                    unit_price = abs(rec.principal_amount / qty)
+                elif rec.invoice_amount:
+                    unit_price = abs((rec.invoice_amount - (rec.total_tax_amount or 0.0)) / qty)
+                else:
+                    unit_price = 0.0
 
                 so_vals = {
                     'partner_id': partner.id,
@@ -416,7 +423,14 @@ class AmazonDashboardRecord(models.Model):
 
                 taxes = rec._find_matching_taxes(company, rec.cgst_rate, rec.sgst_rate, rec.igst_rate, rec.utgst_rate, is_intra=is_intra)
                 qty = abs(rec.quantity) if rec.quantity else 1.0
-                unit_price = abs(rec.tax_exclusive_gross / qty) if rec.tax_exclusive_gross else 0.0
+                if rec.tax_exclusive_gross:
+                    unit_price = abs(rec.tax_exclusive_gross / qty)
+                elif rec.principal_amount:
+                    unit_price = abs(rec.principal_amount / qty)
+                elif rec.invoice_amount:
+                    unit_price = abs((rec.invoice_amount - (rec.total_tax_amount or 0.0)) / qty)
+                else:
+                    unit_price = (origin_inv.invoice_line_ids[:1].price_unit if origin_inv else 0.0)
 
                 refund_vals = {
                     'move_type': 'out_refund',

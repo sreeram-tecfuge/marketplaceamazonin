@@ -135,8 +135,6 @@ class AmazonPaymentRecord(models.Model):
                 if rec.vendor_bill_id and not ord_info.get('vendor_bill_id'):
                     ord_info['vendor_bill_id'] = rec.vendor_bill_id.id
                     ord_info['vendor_bill_name'] = rec.vendor_bill_id.name or f"Bill #{rec.vendor_bill_id.id}"
-                if rec.state == 'posted':
-                    ord_info['is_processed'] = True
                 
                 # Breakdown by description
                 if desc not in ord_info['descriptions']:
@@ -207,8 +205,15 @@ class AmazonPaymentRecord(models.Model):
                             odata['payment_id'] = pmt.id
                             odata['payment_name'] = pmt.name or f"Payment #{pmt.id}"
 
-                if odata.get('payment_id') or odata.get('move_id') or odata.get('vendor_bill_id'):
-                    odata['is_processed'] = True
+                # Resolve payment move_id (Payment Journal Entry) if missing
+                if odata.get('payment_id') and not odata.get('move_id'):
+                    pmt_obj = self.env['account.payment'].browse(odata['payment_id'])
+                    if pmt_obj and pmt_obj.move_id:
+                        odata['move_id'] = pmt_obj.move_id.id
+                        odata['move_name'] = pmt_obj.move_id.name or f"Entry #{pmt_obj.move_id.id}"
+
+                # Mark order as processed only if at least one document exists
+                odata['is_processed'] = bool(odata.get('payment_id') or odata.get('move_id') or odata.get('vendor_bill_id'))
 
         # Format orders list
         orders_list = []
@@ -307,10 +312,10 @@ class AmazonPaymentRecord(models.Model):
 
     @api.model
     def action_process_full_settlement_reconciliation(self, target_order_id=None):
-        """ Automated 3-Step Accounting Reconciliation for Amazon Settlement:
-            1. Customer Payment Registration + Clearing Write-Off against Customer Invoice
-            2. Amazon Transfer Journal Entry (Clearing Account -> Creditors)
-            3. Amazon Vendor Bill Generation (Dynamic lines per amount_description) & Reconcile
+        """ Automated Accounting Reconciliation for Amazon Settlement:
+            1. Customer Payment Registration against Customer Invoice
+            2. Segregation of Amazon Fee Deductions line-by-line per amount_description
+               in Amazon Settlement Clearing Account (1221 / Clearing Account)
         """
         order_id = target_order_id
         if not order_id and isinstance(self, models.Model) and len(self) > 0:
@@ -381,18 +386,17 @@ class AmazonPaymentRecord(models.Model):
                 'is_company': True,
             })
 
-        fee_product = self.env.ref('amazon_sales_dashboard.product_amazon_service_fee', raise_if_not_found=False)
-        if not fee_product:
-            fee_product = self.env['product.product'].search([('name', 'ilike', 'Amazon Service Fee')], limit=1)
-
         payment_journal = self.env['account.journal'].search([('type', 'in', ['bank', 'cash'])], limit=1)
 
         # STEP 1: Customer Invoice Payment Registration + Write-Off
-        # Paid Amount = Item Price (Principal + Tax) - Amazon Fees (excluding TDS/TCS)
-        # Write-Off Amount (Clearing Account) = Amazon Fees (Vendor Bill Amount)
         payment = False
         receivable_line = invoice.line_ids.filtered(lambda l: l.account_id.account_type == 'asset_receivable')
-        if invoice.amount_residual > 0 and receivable_line:
+        
+        # Check if invoice already has payments linked
+        existing_payments = invoice.payment_ids or (invoice._get_reconciled_payments() if hasattr(invoice, '_get_reconciled_payments') else False)
+        if existing_payments:
+            payment = existing_payments[0]
+        elif invoice.amount_residual > 0 and receivable_line:
             if fee_total_amount > 0 and clearing_account:
                 pay_amount = max(0.0, round(invoice.amount_residual - fee_total_amount, 2))
                 if net_settlement_payout > 0:
@@ -422,104 +426,83 @@ class AmazonPaymentRecord(models.Model):
             ).create(pay_wizard_vals)
             
             res_pay = pay_wizard.action_create_payments()
-            if res_pay and isinstance(res_pay, dict) and 'res_id' in res_pay:
+            if res_pay and isinstance(res_pay, dict) and res_pay.get('res_id'):
                 payment = self.env['account.payment'].browse(res_pay['res_id'])
-            elif pay_wizard.payment_token_id or invoice.payment_ids:
-                payment = invoice.payment_ids[0] if invoice.payment_ids else False
+            else:
+                pmts = invoice.payment_ids or (invoice._get_reconciled_payments() if hasattr(invoice, '_get_reconciled_payments') else False)
+                if pmts:
+                    payment = pmts[0]
+                else:
+                    payment = self.env['account.payment'].search([
+                        '|', ('memo', 'ilike', order_id), ('payment_reference', 'ilike', order_id)
+                    ], order='id desc', limit=1)
 
-        # STEP 2: Create Amazon Transfer Journal Entry (Clearing Account -> Creditors)
-        move_entry = False
-        if fee_total_amount > 0 and clearing_account and amazon_partner:
-            payable_account = amazon_partner.property_account_payable_id or self.env['account.account'].search([('account_type', '=', 'liability_payable')], limit=1)
-            
-            entry_vals = {
-                'move_type': 'entry',
-                'date': fields.Date.today(),
-                'ref': f"Amazon Fee Transfer - {order_id}",
-                'amazon_order_id': order_id,
-                'line_ids': [
-                    (0, 0, {
-                        'name': f"Amazon Clearing Transfer - {order_id}",
-                        'account_id': clearing_account.id,
-                        'debit': 0.0,
-                        'credit': fee_total_amount,
-                    }),
-                    (0, 0, {
-                        'name': f"Amazon Creditors Transfer - {order_id}",
-                        'account_id': payable_account.id,
-                        'partner_id': amazon_partner.id,
-                        'debit': fee_total_amount,
-                        'credit': 0.0,
-                    }),
-                ]
-            }
-            move_entry = self.env['account.move'].create(entry_vals)
-            move_entry.action_post()
+        if not payment:
+            # Fallback search for any existing payment for order_id
+            payment = self.env['account.payment'].search([
+                '|', ('memo', 'ilike', order_id), ('payment_reference', 'ilike', order_id)
+            ], order='id desc', limit=1)
 
-        # STEP 3: Create Amazon Vendor Bill & Reconcile
-        vendor_bill = False
-        if fee_total_amount > 0 and amazon_partner and fee_breakdown:
-            bill_lines = []
-            for desc, amt in fee_breakdown.items():
-                fee_name_clean = desc.strip()
+        if not payment:
+            raise UserError(_("Could not register or locate Payment for Customer Invoice '%s' (Order ID '%s').") % (invoice.name, order_id))
 
-                # 1. Search for existing product with matching name and is_amazon_settlement_fee = True
-                fee_prod = self.env['product.product'].search([
-                    ('name', '=', fee_name_clean),
-                    ('is_amazon_settlement_fee', '=', True)
-                ], limit=1)
+        # STEP 2: Segregate Write-Off lines on payment.move_id per fee description
+        if payment and payment.move_id:
+            move = payment.move_id
+            if fee_breakdown and clearing_account:
+                writeoff_lines = move.line_ids.filtered(lambda l: l.account_id.id == clearing_account.id)
+                if writeoff_lines:
+                    move.button_draft()
+                    line_commands = []
+                    # Keep non-clearing lines (bank liquidity line & customer receivable line)
+                    for line in move.line_ids:
+                        if line.account_id.id != clearing_account.id:
+                            line_commands.append((4, line.id, 0))
+                        else:
+                            line_commands.append((2, line.id, 0))
+                    
+                    # Add segregated fee lines for each description in fee_breakdown
+                    for fee_desc, fee_amt in fee_breakdown.items():
+                        fee_amt_rounded = round(fee_amt, 2)
+                        if fee_amt_rounded <= 0:
+                            continue
+                        
+                        fee_label = f"Amazon {fee_desc} - {order_id}"
+                        line_commands.append((0, 0, {
+                            'account_id': clearing_account.id,
+                            'partner_id': amazon_partner.id if amazon_partner else invoice.partner_id.id,
+                            'name': fee_label,
+                            'debit': fee_amt_rounded,
+                            'credit': 0.0,
+                            'currency_id': move.currency_id.id or self.env.company.currency_id.id,
+                        }))
+                    
+                    move.write({'line_ids': line_commands})
+                    move.action_post()
+                    
+                    # Ensure invoice receivable line remains reconciled with payment receivable line
+                    inv_rec = invoice.line_ids.filtered(lambda l: l.account_id.account_type == 'asset_receivable' and not l.reconciled)
+                    pmt_rec = move.line_ids.filtered(lambda l: l.account_id.account_type == 'asset_receivable' and not l.reconciled)
+                    if inv_rec and pmt_rec:
+                        (inv_rec + pmt_rec).reconcile()
 
-                # 2. If not found, create new service product (is_purchase = True)
-                if not fee_prod:
-                    fee_prod = self.env['product.product'].create({
-                        'name': fee_name_clean,
-                        'type': 'service',
-                        'purchase_ok': True,
-                        'is_amazon_settlement_fee': True,
-                        'default_code': f"AMZ-{fee_name_clean.upper().replace(' ', '-')[:20]}",
-                    })
-
-                bill_lines.append((0, 0, {
-                    'product_id': fee_prod.id,
-                    'name': f"[{order_id}] {fee_name_clean}",
-                    'quantity': 1.0,
-                    'price_unit': round(amt, 2),
-                }))
-
-            bill_vals = {
-                'move_type': 'in_invoice',
-                'partner_id': amazon_partner.id,
-                'invoice_date': fields.Date.today(),
-                'ref': f"Amazon Fee Bill - {order_id}",
-                'amazon_order_id': order_id,
-                'invoice_line_ids': bill_lines,
-            }
-            vendor_bill = self.env['account.move'].create(bill_vals)
-            vendor_bill.action_post()
-
-            # Reconcile Vendor Bill with Transfer Journal Entry
-            if move_entry:
-                bill_payable_line = vendor_bill.line_ids.filtered(lambda l: l.account_id.account_type == 'liability_payable')
-                entry_payable_line = move_entry.line_ids.filtered(lambda l: l.account_id.account_type == 'liability_payable')
-                if bill_payable_line and entry_payable_line:
-                    (bill_payable_line + entry_payable_line).reconcile()
+            if 'amazon_order_id' in move._fields:
+                move.write({'amazon_order_id': order_id})
 
         # Update records status
         records.write({
             'state': 'posted',
-            'move_id': move_entry.id if move_entry else False,
             'payment_id': payment.id if payment else False,
-            'vendor_bill_id': vendor_bill.id if vendor_bill else False,
+            'move_id': payment.move_id.id if (payment and payment.move_id) else False,
         })
 
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': _("Automated Reconciliation Complete"),
-                'message': _("Successfully reconciled Customer Payment, created Amazon Transfer Journal Entry %s, and generated Vendor Bill %s for Order %s.") % (
-                    move_entry.name if move_entry else '',
-                    vendor_bill.name if vendor_bill else '',
+                'title': _("Settlement Reconciliation Complete"),
+                'message': _("Successfully reconciled Customer Payment %s with segregated Amazon fee lines for Order %s.") % (
+                    payment.name if payment else '',
                     order_id
                 ),
                 'type': 'success',

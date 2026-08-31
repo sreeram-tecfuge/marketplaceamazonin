@@ -145,7 +145,7 @@
                                             <td class="fw-bold font-monospace text-success"><t t-esc="state.kpis.currency_symbol || '₹'"/> <t t-esc="ord.total_amount"/></td>
                                             <td class="text-end pe-4">
                                                 <t t-if="!ord.is_processed">
-                                                    <button class="btn btn-sm btn-success rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1 shadow-sm" t-on-click.stop="() => this.onProcessFullSettlement(ord.order_id)" title="Automate Customer Payment, Journal Entry &amp; Vendor Bill">
+                                                    <button class="btn btn-sm btn-success rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1 shadow-sm" t-on-click.stop="() => this.onProcessFullSettlement(ord.order_id)" title="Process Customer Payment &amp; Segregated Fee Clearing">
                                                         <i class="fa fa-cogs"></i> Process Settlement
                                                     </button>
                                                 </t>
@@ -273,8 +273,8 @@
                             <div class="modal-footer bg-white border-top py-3 px-4 d-flex justify-content-between align-items-center">
                                 <div class="d-flex align-items-center gap-2 flex-wrap">
                                     <t t-if="state.selectedOrder &amp;&amp; !state.selectedOrder.is_processed">
-                                        <button class="btn btn-success rounded-pill px-4 py-2 fw-semibold shadow-sm" t-on-click="() => this.onProcessFullSettlement(state.selectedOrder ? state.selectedOrder.order_id : null)" title="Automate Customer Payment, Journal Entry &amp; Vendor Bill">
-                                            <i class="fa fa-cogs me-1"></i> Automate Payment, Journal &amp; Vendor Bill
+                                        <button class="btn btn-success rounded-pill px-4 py-2 fw-semibold shadow-sm" t-on-click="() => this.onProcessFullSettlement(state.selectedOrder ? state.selectedOrder.order_id : null)" title="Process Customer Payment &amp; Segregated Fee Clearing">
+                                            <i class="fa fa-cogs me-1"></i> Process Payment &amp; Fee Settlement
                                         </button>
                                     </t>
                                     <t t-if="state.selectedOrder &amp;&amp; state.selectedOrder.is_processed">

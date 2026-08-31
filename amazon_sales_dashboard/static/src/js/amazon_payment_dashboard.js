@@ -123,7 +123,7 @@ export class AmazonPaymentDashboard extends Component {
             if (res && typeof res === "object" && res.type === "ir.actions.client") {
                 await this.action.doAction(res);
             } else {
-                this.notification.add(`Successfully processed Payment, Journal Entry & Vendor Bill for Order ${targetOrderId}!`, { type: "success" });
+                this.notification.add(`Successfully processed Payment & Segregated Fee Clearing for Order ${targetOrderId}!`, { type: "success" });
             }
             await this.loadDashboardData(targetOrderId);
         } catch (error) {

@@ -1,0 +1,3 @@
+transaction-type,order-id,invoice-number,invoice-date,order-date,shipment-id,shipment-date,sku,item-description,quantity,tax-exclusive-gross,principal-amount,total-tax-amount,invoice-amount,ship-to-city,ship-to-state,marketplace-name
+Shipment,404-8889999-1112222,INV-2026-003,2026-08-20,2026-08-20,SHIP-8889999,2026-08-20,AMZ-PROD-003,Amazon Sample Noise Cancelling Headphones,1,1500.00,1500.00,270.00,1770.00,Mumbai,Maharashtra,Amazon.in
+Shipment,404-3334444-5556666,INV-2026-004,2026-08-22,2026-08-22,SHIP-3334444,2026-08-22,AMZ-PROD-004,Amazon Sample Bluetooth Speaker,1,3000.00,3000.00,540.00,3540.00,Bangalore,Karnataka,Amazon.in
